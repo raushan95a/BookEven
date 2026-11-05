@@ -31,11 +31,15 @@ You will also need a MongoDB database (e.g., [MongoDB Atlas Free Tier](https://w
 Navigate to `server/.env` and fill in the necessary keys:
 ```env
 MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=supersecretjwtkey_bookeven
+JWT_SECRET=paste_a_long_random_secret_here
 EMAIL_USER=your_gmail_address
 EMAIL_PASS=your_gmail_app_password
 PORT=5000
+CLIENT_ORIGIN=http://localhost:5173
 ```
+> **JWT_SECRET**: generate your own with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. The server refuses to start if the secret is missing, shorter than 32 characters, or a published example value. Never commit it or paste it into docs.
+>
+> **CLIENT_ORIGIN**: the URL of the frontend allowed to call the API (comma-separate several). Defaults to `http://localhost:5173`.
 > **Note**: For `EMAIL_PASS`, you need to generate an "App Password" from your Google Account settings, standard passwords won't work due to 2FA.
 
 ### 2. Run from Outer Folder (Single Terminal)

@@ -56,14 +56,18 @@ Now that you have your credentials, you need to plug them into the backend. Open
 # Paste the MongoDB string you generated (make sure you swapped the password)
 MONGO_URI=mongodb+srv://<username>:<password>@<cluster-name>.mongodb.net/bookeven?retryWrites=true&w=majority
 
-# This can be any random string, but keep it secure.
-JWT_SECRET=supersecretjwtkey_bookeven
+# Must be a long random value that only you know (the server refuses short or example values).
+# Generate one with: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+JWT_SECRET=paste_a_long_random_secret_here
 
 # Email Setup Configured using Step 2
 EMAIL_USER=yourgmail@gmail.com
 EMAIL_PASS=the_16_character_app_password
 
 PORT=5000
+
+# Frontend URL allowed to call the API
+CLIENT_ORIGIN=http://localhost:5173
 ```
 
 ---
