@@ -30,6 +30,14 @@ const createApp = (config) => {
     app.use(cors({ origin: config.clientOrigins }));
     app.use(express.json({ limit: '10kb' }));
 
+    // Health check & root endpoints
+    app.get('/', (req, res) => {
+        res.json({ status: 'ok', message: 'BookEven API is running' });
+    });
+    app.get('/api/health', (req, res) => {
+        res.json({ status: 'ok', uptime: process.uptime() });
+    });
+
     // Routes
     app.use('/api/auth', authRoutes);
     app.use('/api/events', eventRoutes);
