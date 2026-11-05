@@ -22,7 +22,7 @@ BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. 
   - Booking closes when the event starts. After that, a still-pending request can only be declined (not approved), attendees can no longer cancel (the organiser or an admin still can, to correct records), and an event that still has active bookings cannot be deleted (it is kept as a record; a past event with no active bookings can be).
   - Approve, cancel, decline and event deletion each run in a MongoDB transaction: all of it happens or none of it does.
   - Deleting an event cancels its active bookings, keeps them as history and emails the users.
-- **Emails** (Nodemailer + Gmail): verification codes, booking confirmed, request declined, event cancelled. If an email cannot be sent, the API says so instead of failing silently.
+- **Emails** (Gmail SMTP via Nodemailer, or the Brevo API on hosts that block SMTP): verification codes, booking confirmed, request declined, event cancelled. If an email cannot be sent, the API says so instead of failing silently.
 - **Security**: input validation on every endpoint, protection against NoSQL injection, rate limits on login/sign-up/codes/bookings (login limits count only failed attempts, so correct logins never lock anyone out), security headers, CORS allow-list, server refuses to start with a weak or published JWT secret.
 
 ---
@@ -51,7 +51,10 @@ CLIENT_ORIGIN=http://localhost:5173
 | --- | --- | --- |
 | `MONGO_URI` | Yes | Atlas or a replica set (transactions are required). |
 | `JWT_SECRET` | Yes | At least 32 characters. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. Never commit it. |
-| `EMAIL_USER`, `EMAIL_PASS` | Yes, for email | Gmail address and its 16-letter App Password. Without them, verification codes cannot be delivered (the server warns at startup). |
+| `EMAIL_USER`, `EMAIL_PASS` | Yes, for Gmail | Gmail address and its 16-letter App Password. Without email settings, verification codes cannot be delivered (the server warns at startup). |
+| `BREVO_API_KEY` | For Brevo | Sends email through [Brevo](https://www.brevo.com)'s HTTPS API instead of Gmail SMTP. Needed on hosts that block SMTP, such as **Render's free plan**. When set, `EMAIL_PASS` is not used. |
+| `EMAIL_FROM` | With Brevo | Sender address; must be a sender verified in Brevo. Defaults to `EMAIL_USER`. |
+| `EMAIL_FROM_NAME` | No | Sender name shown in inboxes. Default `BookEven`. |
 | `CLIENT_ORIGIN` | No | Frontend URL(s) allowed to call the API, comma-separated. Default `http://localhost:5173`. |
 | `PORT` | No | Default `5000`. |
 | `JWT_EXPIRES_IN` | No | Login lifetime, default `7d`. |
@@ -162,6 +165,9 @@ Base URL: `http://localhost:5000/api`. Authenticated requests send `Authorizatio
 | `MongoDB Connection Error` with an SSL/TLS alert | Your IP is not allowed (Atlas > Network Access > Add Current IP Address). |
 | `535 Username and Password not accepted` in the server log | `EMAIL_PASS` must be a Gmail App Password for the `EMAIL_USER` account, not the normal password. |
 | `We could not send the email with your code right now` | Same as above, or Gmail is temporarily unavailable. The user can press **Resend code**. |
+| Deployed on Render: no codes arrive; log shows `ETIMEDOUT`, `ECONNECTION` or `Connection timeout` | Render's free plan blocks outgoing SMTP. Use Brevo: set `BREVO_API_KEY` and `EMAIL_FROM` (see [SETUP_GUIDE.md](SETUP_GUIDE.md#step-10-deploy-render--vercel)). |
+| Log shows `Brevo refused the email (HTTP 401)` | Wrong `BREVO_API_KEY`. Create a new key in Brevo → SMTP & API → API Keys. |
+| Log shows `Brevo refused the email (HTTP 400)` mentioning the sender | `EMAIL_FROM` is not a verified sender in Brevo → Senders, Domains & Dedicated IPs → Senders. |
 | Requests from the browser are blocked (CORS) | Add the frontend URL to `CLIENT_ORIGIN`. A common cause: port 5173 was busy, so Vite started on 5174. Free 5173 and restart `npm run dev`. |
 | `'concurrently' is not recognized` | Run `npm install` in the project root before `npm run dev`. |
 | `Invalid credentials` on a fresh setup | The database has no users yet. Run `npm run seed` or register first. |

@@ -52,6 +52,8 @@ CLIENT_ORIGIN=http://localhost:5173
 
 Never commit this file.
 
+Gmail works on your own computer. When you deploy to a host that blocks email over SMTP (such as Render's free plan), use Brevo instead; see [Step 10](#step-10-deploy-render--vercel).
+
 ---
 
 ## Step 4: Install
@@ -148,7 +150,7 @@ Use a normal window for one account and a private/incognito window for another, 
 npm test --prefix server
 ```
 
-About 25 seconds, 119 tests. They run on a temporary in-memory database: they **never** touch the database in `.env` and never send email. A `MongoNetworkError: read ECONNRESET` line near the end is harmless shutdown noise; check the final `pass` / `fail` counts.
+About 25 seconds, 125 tests. They run on a temporary in-memory database: they **never** touch the database in `.env` and never send email. A `MongoNetworkError: read ECONNRESET` line near the end is harmless shutdown noise; check the final `pass` / `fail` counts.
 
 Client build check: `npm run build`.
 
@@ -163,6 +165,58 @@ Client build check: `npm run build`.
    - **Bookings (user):** *Send booking code* → *Request a seat* (with the emailed code) → *My bookings*.
    - **Bookings (admin):** *List all bookings* → *Approve booking* / *Reject booking* → *Mark as paid* → *Booking stats*.
    - *Cancel booking* and *Delete event (admin)* to clean up.
+
+---
+
+## Step 10: Deploy (Render + Vercel)
+
+The server runs on [Render](https://render.com) and the client on [Vercel](https://vercel.com).
+
+### Email on Render: use Brevo
+Render's **free plan blocks outgoing SMTP**, so Gmail cannot send from there: codes never arrive and the Render log shows `ETIMEDOUT` or `Connection timeout`. [Brevo](https://www.brevo.com) sends over HTTPS instead, and its free plan allows 300 emails a day.
+
+1. Sign up at [brevo.com](https://www.brevo.com) (free plan).
+2. **Verify a sender:** Brevo → **Senders, Domains & Dedicated IPs** → **Senders** → **Add a sender**. Use the address emails should come from (your Gmail works) and click the confirmation link Brevo emails you.
+3. **Create an API key:** Brevo → **SMTP & API** → **API Keys** → **Generate a new API key**. Copy it (it starts with `xkeysib-`). This is the API key, not the SMTP key.
+4. Your Brevo account may need activating before it can send: if the log shows a `401`/`403` about the account, complete the profile Brevo asks for, or contact Brevo support.
+
+### Render (server)
+Create a **Web Service** from your GitHub repository:
+
+| Setting | Value |
+| --- | --- |
+| Root Directory | `server` |
+| Build Command | `npm install` |
+| Start Command | `npm start` |
+
+**Environment** variables:
+
+| Key | Value |
+| --- | --- |
+| `MONGO_URI` | Your Atlas connection string (Atlas Network Access must allow `0.0.0.0/0`, since Render's IPs change) |
+| `JWT_SECRET` | A long random value (Step 3) |
+| `BREVO_API_KEY` | The key from Brevo |
+| `EMAIL_FROM` | The sender you verified in Brevo |
+| `CLIENT_ORIGIN` | Your Vercel URL, e.g. `https://bookeven.vercel.app` (no trailing `/`; comma-separate several) |
+| `TRUST_PROXY` | `1` |
+| `NODE_ENV` | `production` |
+
+After deploying, the log should show `Email: sending through Brevo` and `Server running on port ...`. Open `https://<your-app>.onrender.com/api/health` to check it responds. Free Render services sleep when idle, so the first request after a while can take up to a minute.
+
+### Vercel (client)
+Import the same repository:
+
+| Setting | Value |
+| --- | --- |
+| Root Directory | `client` |
+| Framework Preset | Vite |
+| Environment variable `VITE_API_URL` | `https://<your-app>.onrender.com/api` |
+
+`VITE_API_URL` is built into the client, so **redeploy on Vercel** after changing it.
+
+### Check it works
+1. Open your Vercel site and register with a real email: the code should arrive within a few seconds (check Spam the first time).
+2. If it does not, open the Render **Logs** and look for `Error sending OTP email ...`; the [Troubleshooting](#troubleshooting) table below lists each message.
 
 ---
 
@@ -181,3 +235,7 @@ Client build check: `npm run build`.
 | `MongoDB Connection Error: bad auth` | Wrong database user or password in `MONGO_URI`. |
 | `MongoDB Connection Error` with an SSL/TLS alert | Your IP is not allowed: Atlas → Network Access → Add Current IP Address. |
 | `535 Username and Password not accepted` in the server log | `EMAIL_PASS` must be a Gmail App Password for `EMAIL_USER` (Step 2). |
+| Deployed: no codes arrive, Render log shows `ETIMEDOUT`, `ECONNECTION` or `Connection timeout` | Render blocks SMTP. Set up Brevo (Step 10). |
+| `Brevo refused the email (HTTP 401)` | Wrong `BREVO_API_KEY` (use an API key, not an SMTP key), or the Brevo account is not activated yet. |
+| `Brevo refused the email (HTTP 400)` about the sender | `EMAIL_FROM` is not a verified sender in Brevo. |
+| Deployed site: CORS error or `Network Error` | `CLIENT_ORIGIN` on Render must exactly match your Vercel URL, and `VITE_API_URL` on Vercel must point to Render's `/api` (redeploy Vercel after changing it). |

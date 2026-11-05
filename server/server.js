@@ -34,8 +34,13 @@ const start = async () => {
     const { version } = await mongoose.connection.db.admin().command({ buildInfo: 1 });
     assertSupportedMongoVersion(version);
 
-    if (!require('./utils/email').isEmailConfigured()) {
-        console.warn('Warning: EMAIL_USER / EMAIL_PASS are not set. Verification codes and notifications cannot be emailed.');
+    const email = require('./utils/email');
+    if (!email.isEmailConfigured()) {
+        console.warn(email.emailProvider() === 'brevo'
+            ? 'Warning: BREVO_API_KEY is set but no sender address. Set EMAIL_FROM (or EMAIL_USER) to a sender verified in Brevo.'
+            : 'Warning: EMAIL_USER / EMAIL_PASS are not set. Verification codes and notifications cannot be emailed.');
+    } else {
+        console.log(`Email: sending through ${email.emailProvider() === 'brevo' ? 'Brevo' : 'Gmail SMTP'}`);
     }
 
     const app = createApp(config);

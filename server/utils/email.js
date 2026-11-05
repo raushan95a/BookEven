@@ -6,15 +6,67 @@ const { escapeHtml } = require('./validation');
 // Read server/.env even when this file is loaded on its own (e.g. by a script).
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
-});
+/*
+ * Two ways to send email, chosen by environment variables:
+ * - Brevo (HTTPS API), when BREVO_API_KEY is set. Use this on hosts that block outgoing
+ *   SMTP, such as Render's free plan. The sender (EMAIL_FROM, or EMAIL_USER) must be a
+ *   sender verified in Brevo.
+ * - Gmail (SMTP), otherwise: EMAIL_USER plus a Gmail App Password in EMAIL_PASS.
+ */
+const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
+const SEND_TIMEOUT_MS = 15000;
 
-const isEmailConfigured = () => Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+const emailProvider = (env = process.env) => (env.BREVO_API_KEY ? 'brevo' : 'gmail');
+const senderAddress = (env = process.env) => env.EMAIL_FROM || env.EMAIL_USER;
+const senderName = (env = process.env) => env.EMAIL_FROM_NAME || 'BookEven';
+
+const isEmailConfigured = (env = process.env) => (emailProvider(env) === 'brevo'
+    ? Boolean(env.BREVO_API_KEY && senderAddress(env))
+    : Boolean(env.EMAIL_USER && env.EMAIL_PASS));
+
+// Created on first use, so the settings in force at that time are used.
+let transporter;
+const gmailTransporter = () => {
+    if (!transporter) {
+        transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+            // Fail within seconds when SMTP is blocked, instead of hanging for minutes.
+            connectionTimeout: SEND_TIMEOUT_MS,
+            greetingTimeout: SEND_TIMEOUT_MS,
+            socketTimeout: SEND_TIMEOUT_MS
+        });
+    }
+    return transporter;
+};
+
+/**
+ * Sends one message through Brevo's transactional email API.
+ * Throws with a readable message (and Brevo's error code) when Brevo refuses it.
+ */
+const sendWithBrevo = async ({ to, subject, html }, { env = process.env, fetchImpl = fetch } = {}) => {
+    const response = await fetchImpl(BREVO_URL, {
+        method: 'POST',
+        headers: { 'api-key': env.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+            sender: { name: senderName(env), email: senderAddress(env) },
+            to: [{ email: to }],
+            subject,
+            htmlContent: html
+        }),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
+    });
+    if (!response.ok) {
+        let detail = '';
+        try {
+            const data = await response.json();
+            detail = [data.code, data.message].filter(Boolean).join(': ');
+        } catch { /* body was not JSON */ }
+        const error = new Error(`Brevo refused the email (HTTP ${response.status})${detail ? ` - ${detail}` : ''}`);
+        error.code = `BREVO_${response.status}`;
+        throw error;
+    }
+};
 
 // Subjects are plain text: strip line breaks so user text can't add email headers.
 const oneLine = (text) => String(text).replace(/[\r\n]/g, ' ');
@@ -28,11 +80,15 @@ const deliver = async (label, mailOptions) => {
     // Safety net: automated tests must never send real email, even if a test forgets a stub.
     if (process.env.NODE_ENV === 'test') return true;
     try {
-        await transporter.sendMail({ from: process.env.EMAIL_USER, ...mailOptions });
+        if (emailProvider() === 'brevo') {
+            await sendWithBrevo(mailOptions);
+        } else {
+            await gmailTransporter().sendMail({ from: `"${senderName()}" <${senderAddress()}>`, ...mailOptions });
+        }
         console.log(`${label} email sent to`, mailOptions.to);
         return true;
     } catch (error) {
-        console.error(`Error sending ${label} email to ${mailOptions.to}:`, error.code || '', error.message);
+        console.error(`Error sending ${label} email to ${mailOptions.to} via ${emailProvider()}:`, error.code || '', error.message);
         return false;
     }
 };
@@ -144,6 +200,8 @@ module.exports = {
     sendEventSubmittedEmail,
     sendEventReviewEmail,
     isEmailConfigured,
+    emailProvider,
+    sendWithBrevo,
     sendBookingEmail,
     sendOTPEmail,
     sendEventCancelledEmail,
