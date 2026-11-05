@@ -64,8 +64,8 @@ VITE_API_URL=https://your-api.example.com/api
 ### 3. Install and run
 From the project root (one terminal):
 ```bash
-npm install
-npm run install:all
+npm install          # root tools (concurrently); needed before npm run dev
+npm run install:all  # server and client packages (same as npm run setup)
 npm run dev
 ```
 - `npm run dev` starts the server (`http://localhost:5000`) and the client (`http://localhost:5173`) together.
@@ -83,7 +83,12 @@ cd client && npm install && npm run dev
 cd server
 npm run seed
 ```
-**This deletes every user, event and booking** in the database from `MONGO_URI`, then creates 10 users, 6 events and random bookings. All seeded accounts use the password `password123` (admin: `admin@bookeven.com`). Never run it against a database with real data. It refuses to run when `NODE_ENV=production`.
+**This deletes every user, event and booking** in the database from `MONGO_URI`, then creates 10 verified users, 6 events and random bookings. All seeded accounts use the password `password123` (admin: `admin@bookeven.com`). Never run it against a database with real data. It refuses to run when `NODE_ENV=production`.
+
+### 5. First run: accounts and admins
+A new database is empty, so no one can log in until you either run the seed above or register in the app. Accounts created through **Register** are always ordinary users; the API ignores any `role` sent with the request. To make an account an admin, change its `role` from `"user"` to `"admin"` in the `users` collection (Atlas → Browse Collections), then log out and back in. Admins land on `/admin` after logging in; users land on `/dashboard`.
+
+A step-by-step walkthrough for testing every feature in the browser is in [SETUP_GUIDE.md](SETUP_GUIDE.md#step-7-test-it-in-the-browser).
 
 ---
 
@@ -155,4 +160,8 @@ Base URL: `http://localhost:5000/api`. Authenticated requests send `Authorizatio
 | `MongoDB Connection Error` with an SSL/TLS alert | Your IP is not allowed (Atlas > Network Access > Add Current IP Address). |
 | `535 Username and Password not accepted` in the server log | `EMAIL_PASS` must be a Gmail App Password for the `EMAIL_USER` account, not the normal password. |
 | `We could not send the email with your code right now` | Same as above, or Gmail is temporarily unavailable. The user can press **Resend code**. |
-| Requests from the browser are blocked (CORS) | Add the frontend URL to `CLIENT_ORIGIN`. |
+| Requests from the browser are blocked (CORS) | Add the frontend URL to `CLIENT_ORIGIN`. A common cause: port 5173 was busy, so Vite started on 5174. Free 5173 and restart `npm run dev`. |
+| `'concurrently' is not recognized` | Run `npm install` in the project root before `npm run dev`. |
+| `Invalid credentials` on a fresh setup | The database has no users yet. Run `npm run seed` or register first. |
+| Register says `User already exists` | The account exists but is not verified. Log in with the same email and password; the app asks for a code and emails a new one. |
+| `MongoNetworkError: read ECONNRESET` at the end of `npm test` | Harmless noise from the in-memory database shutting down; check the pass/fail counts. |
