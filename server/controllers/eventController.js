@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const Event = require('../models/Event');
+const bookingService = require('../services/bookingService');
+const { sendEventCancelledEmail } = require('../utils/email');
 const {
     HttpError,
     requireString,
@@ -130,9 +132,15 @@ exports.updateEvent = async (req, res, next) => {
 exports.deleteEvent = async (req, res, next) => {
     try {
         const eventId = requireObjectId(req.params.id, 'event id');
-        const event = await Event.findByIdAndDelete(eventId);
-        if (!event) return res.status(404).json({ message: 'Event not found' });
-        res.json({ message: 'Event deleted successfully' });
+        // Cancels the event's active bookings and deletes the event in one transaction.
+        const { event, affected } = await bookingService.deleteEventWithBookings({ eventId, actorId: req.user._id });
+
+        // Notify affected users after the commit. A failed email never undoes the deletion.
+        await Promise.allSettled(
+            affected.map((b) => sendEventCancelledEmail(b.email, b.name, event.title))
+        );
+
+        res.json({ message: 'Event deleted successfully', cancelledBookings: affected.length });
     } catch (error) {
         next(error);
     }

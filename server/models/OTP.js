@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const otpSchema = new mongoose.Schema({
-    email: { type: String, required: true },
+    email: { type: String, required: true, lowercase: true, trim: true },
     // HMAC of the code; the plain code is only ever emailed, never stored.
     otpHash: { type: String, required: true },
     action: { type: String, enum: ['account_verification', 'event_booking'], required: true },

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const OTP = require('../models/OTP');
+const { normalizeEmail } = require('./validation');
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -26,7 +27,8 @@ const isExpired = (record) => Date.now() - record.createdAt.getTime() > OTP_TTL_
  * If a code was issued less than a minute ago it is kept and nothing new is sent,
  * which stops repeated requests from flooding someone's inbox.
  */
-const issueOTP = async (email, action) => {
+const issueOTP = async (rawEmail, action) => {
+    const email = normalizeEmail(rawEmail);
     const existing = await OTP.findOne({ email, action });
     if (existing && !isExpired(existing) && Date.now() - existing.createdAt.getTime() < RESEND_COOLDOWN_MS) {
         return { sent: false };
@@ -43,7 +45,8 @@ const issueOTP = async (email, action) => {
  * Each code allows MAX_ATTEMPTS guesses in total, counted atomically so that
  * parallel requests cannot get extra guesses.
  */
-const consumeOTP = async (email, action, code) => {
+const consumeOTP = async (rawEmail, action, code) => {
+    const email = normalizeEmail(rawEmail);
     const record = await OTP.findOneAndUpdate(
         { email, action, attempts: mongoose.trusted({ $lt: MAX_ATTEMPTS }) },
         { $inc: { attempts: 1 } },

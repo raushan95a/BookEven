@@ -4,9 +4,9 @@ const Event = require('../models/Event');
 const { sendBookingEmail, sendOTPEmail } = require('../utils/email');
 const { issueOTP, consumeOTP } = require('../utils/otp');
 const { HttpError, requireObjectId, requireOtp } = require('../utils/validation');
+const bookingService = require('../services/bookingService');
 
-const ACTIVE_STATUSES = ['pending', 'confirmed'];
-const PAYMENT_STATUSES = ['paid', 'not_paid'];
+const { ACTIVE_STATUSES } = Booking;
 
 // Events created from the admin form store a date with no time (midnight UTC), so an
 // event stays bookable until the end of that day instead of from midnight.
@@ -50,13 +50,22 @@ exports.bookEvent = async (req, res, next) => {
         const isValid = await consumeOTP(req.user.email, 'event_booking', otp);
         if (!isValid) throw new HttpError(400, 'Invalid or expired OTP for booking');
 
-        const booking = await Booking.create({
-            userId: req.user._id,
-            eventId,
-            status: 'pending',
-            paymentStatus: 'not_paid',
-            amount: event.ticketPrice
-        });
+        let booking;
+        try {
+            booking = await Booking.create({
+                userId: req.user._id,
+                eventId,
+                status: 'pending',
+                paymentStatus: 'not_paid',
+                amount: event.ticketPrice,
+                eventSnapshot: { title: event.title, date: event.date }
+            });
+        } catch (error) {
+            // The database's unique index caught a duplicate that slipped past the check above
+            // (two requests at the same moment).
+            if (error.code === 11000) throw new HttpError(400, 'Already booked or pending');
+            throw error;
+        }
 
         res.status(201).json({ message: 'Booking request submitted', booking });
     } catch (error) {
@@ -67,47 +76,13 @@ exports.bookEvent = async (req, res, next) => {
 exports.confirmBooking = async (req, res, next) => {
     try {
         const bookingId = requireObjectId(req.params.id, 'booking id');
-        const { paymentStatus } = req.body;
-        if (paymentStatus !== undefined && !PAYMENT_STATUSES.includes(paymentStatus)) {
-            throw new HttpError(400, "paymentStatus must be 'paid' or 'not_paid'");
-        }
+        const confirmed = await bookingService.confirmBooking({
+            bookingId,
+            paymentStatus: req.body.paymentStatus,
+            actorId: req.user._id
+        });
 
-        const booking = await Booking.findById(bookingId);
-        if (!booking) throw new HttpError(404, 'Booking not found');
-        if (booking.status === 'confirmed') throw new HttpError(400, 'Booking is already confirmed');
-        if (booking.status !== 'pending') throw new HttpError(400, 'Only pending bookings can be confirmed');
-
-        // Take a seat in one atomic step: the "seats left?" check and the decrement happen
-        // together inside MongoDB, so two admins can never both take the last seat.
-        const event = await Event.findOneAndUpdate(
-            { _id: booking.eventId, availableSeats: mongoose.trusted({ $gt: 0 }) },
-            { $inc: { availableSeats: -1 } },
-            { new: true }
-        );
-        if (!event) {
-            const eventExists = await Event.exists({ _id: booking.eventId });
-            throw eventExists
-                ? new HttpError(400, 'No seats available to confirm this booking')
-                : new HttpError(404, 'Event not found');
-        }
-
-        const update = { status: 'confirmed' };
-        if (paymentStatus) update.paymentStatus = paymentStatus;
-
-        // Only move the booking from pending. If it changed meanwhile (cancelled or
-        // confirmed by another request), give the seat back.
-        const confirmed = await Booking.findOneAndUpdate(
-            { _id: bookingId, status: 'pending' },
-            update,
-            { new: true }
-        ).populate('userId', 'name email').populate('eventId');
-
-        if (!confirmed) {
-            await Event.updateOne({ _id: booking.eventId }, { $inc: { availableSeats: 1 } });
-            throw new HttpError(409, 'This booking was changed by another request. Please refresh and try again.');
-        }
-
-        // Send email on admin confirmation
+        // Send email on admin confirmation (after the transaction has committed)
         if (confirmed.userId && confirmed.eventId) {
             await sendBookingEmail(confirmed.userId.email, confirmed.userId.name, confirmed.eventId.title);
         }
@@ -132,31 +107,7 @@ exports.getMyBookings = async (req, res, next) => {
 exports.cancelBooking = async (req, res, next) => {
     try {
         const bookingId = requireObjectId(req.params.id, 'booking id');
-
-        const booking = await Booking.findById(bookingId);
-        if (!booking) throw new HttpError(404, 'Booking not found');
-        if (booking.userId.toString() !== req.user.id && req.user.role !== 'admin') {
-            throw new HttpError(403, 'Not authorized');
-        }
-        if (booking.status === 'cancelled') throw new HttpError(400, 'Already cancelled');
-
-        // Atomic status change that returns the previous state, so a seat is restored
-        // at most once even if the cancel button is pressed twice.
-        const previous = await Booking.findOneAndUpdate(
-            { _id: bookingId, status: mongoose.trusted({ $in: ACTIVE_STATUSES }) },
-            { status: 'cancelled' },
-            { new: false }
-        );
-        if (!previous) throw new HttpError(400, 'Already cancelled');
-
-        // Only restore the seat if it was actually confirmed and deducted, and never above the total.
-        if (previous.status === 'confirmed') {
-            await Event.updateOne(
-                { _id: previous.eventId, $expr: mongoose.trusted({ $lt: ['$availableSeats', '$totalSeats'] }) },
-                { $inc: { availableSeats: 1 } }
-            );
-        }
-
+        await bookingService.cancelBooking({ bookingId, actor: req.user });
         res.json({ message: 'Booking cancelled successfully' });
     } catch (error) {
         next(error);

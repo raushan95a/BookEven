@@ -35,11 +35,18 @@ const optionalString = (value, field, options = {}) => {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Emails are compared case-insensitively everywhere, so they are always lowercased.
+const normalizeEmail = (email) => email.trim().toLowerCase();
+
 const requireEmail = (value) => {
-    const email = requireString(value, 'Email', { max: 254 });
+    const email = normalizeEmail(requireString(value, 'Email', { max: 254 }));
     if (!EMAIL_PATTERN.test(email)) throw badRequest('Email address is not valid');
     return email;
 };
+
+// For login and verification: any non-empty string, lowercased. No format rule, so
+// no existing account is locked out by a stricter check.
+const requireLoginEmail = (value) => normalizeEmail(requireString(value, 'Email', { max: 254 }));
 
 const requireOtp = (value) => {
     if (typeof value !== 'string' || !/^\d{6}$/.test(value.trim())) {
@@ -101,7 +108,9 @@ module.exports = {
     badRequest,
     requireString,
     optionalString,
+    normalizeEmail,
     requireEmail,
+    requireLoginEmail,
     requireOtp,
     requireObjectId,
     requireNumber,

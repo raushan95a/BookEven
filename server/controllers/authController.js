@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { sendOTPEmail } = require('../utils/email');
 const { issueOTP, consumeOTP } = require('../utils/otp');
-const { HttpError, requireString, requireEmail, requireOtp } = require('../utils/validation');
+const { HttpError, requireString, requireEmail, requireLoginEmail, requireOtp } = require('../utils/validation');
 
 const generateToken = (id, role) => {
     return jwt.sign({ id, role }, process.env.JWT_SECRET, {
@@ -22,9 +22,6 @@ const authResponse = (user) => ({
 
 // Compared against when the email is unknown, so a missing account takes as long as a wrong password.
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync('bookeven-timing-equaliser', 10);
-
-// Login accepts any non-empty email string so existing accounts are never locked out by a stricter format rule.
-const loginEmail = (value) => requireString(value, 'Email', { max: 254 });
 
 const sendVerificationCode = async (email) => {
     const otp = await issueOTP(email, 'account_verification');
@@ -64,7 +61,7 @@ exports.register = async (req, res, next) => {
 
 exports.login = async (req, res, next) => {
     try {
-        const email = loginEmail(req.body.email);
+        const email = requireLoginEmail(req.body.email);
         const password = requireString(req.body.password, 'Password', { max: 128, trim: false });
 
         const user = await User.findOne({ email });
@@ -85,7 +82,7 @@ exports.login = async (req, res, next) => {
 
 exports.verifyOTP = async (req, res, next) => {
     try {
-        const email = loginEmail(req.body.email);
+        const email = requireLoginEmail(req.body.email);
         const otp = requireOtp(req.body.otp);
 
         const isValid = await consumeOTP(email, 'account_verification', otp);

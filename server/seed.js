@@ -152,7 +152,8 @@ const seedDatabase = async () => {
                     eventId: event._id,
                     status: status,
                     paymentStatus: paymentStatus,
-                    amount: event.ticketPrice
+                    amount: event.ticketPrice,
+                    eventSnapshot: { title: event.title, date: event.date }
                 });
 
                 // Deduct available seats specifically for confirmed tickets!

@@ -63,4 +63,26 @@ const sendOTPEmail = async (userEmail, otp, type) => {
     }
 };
 
-module.exports = { sendBookingEmail, sendOTPEmail };
+// Sent when an admin deletes an event that this user had a pending or confirmed booking for.
+const sendEventCancelledEmail = async (userEmail, userName, eventTitle) => {
+    try {
+        const safeName = escapeHtml(userName);
+        const safeTitle = escapeHtml(eventTitle);
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: userEmail,
+            subject: `Event Cancelled: ${String(eventTitle).replace(/[\r\n]/g, ' ')}`,
+            html: `
+        <h2>Hi ${safeName},</h2>
+        <p>Unfortunately the event <strong>${safeTitle}</strong> has been cancelled by the organiser, and your booking has been cancelled with it.</p>
+        <p>If you paid for this booking, the organiser will contact you about a refund.</p>
+        <p>Thank you for using BookEven.</p>
+      `
+        });
+        console.log('Event cancellation email sent to', userEmail);
+    } catch (error) {
+        console.error('Error sending event cancellation email:', error);
+    }
+};
+
+module.exports = { sendBookingEmail, sendOTPEmail, sendEventCancelledEmail };
