@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { register, login, verifyOTP } = require('../controllers/authController');
+const { register, login, verifyOTP, resendOTP } = require('../controllers/authController');
 const { rateLimit, byIp, byEmail } = require('../middleware/security');
 
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
@@ -14,9 +14,14 @@ const loginEmailLimiter = rateLimit({ windowMs: FIFTEEN_MINUTES, max: 10, keyGen
     message: 'Too many login attempts for this account. Please try again in 15 minutes.' });
 const verifyLimiter = rateLimit({ windowMs: FIFTEEN_MINUTES, max: 20, keyGenerator: byIp('verify'),
     message: 'Too many verification attempts. Please try again in 15 minutes.' });
+const resendIpLimiter = rateLimit({ windowMs: FIFTEEN_MINUTES, max: 10, keyGenerator: byIp('resend'),
+    message: 'Too many code requests. Please try again in 15 minutes.' });
+const resendEmailLimiter = rateLimit({ windowMs: FIFTEEN_MINUTES, max: 5, keyGenerator: byEmail('resend'),
+    message: 'Too many code requests for this account. Please try again in 15 minutes.' });
 
 router.post('/register', registerLimiter, register);
 router.post('/login', loginIpLimiter, loginEmailLimiter, login);
 router.post('/verify-otp', verifyLimiter, verifyOTP);
+router.post('/resend-otp', resendIpLimiter, resendEmailLimiter, resendOTP);
 
 module.exports = router;

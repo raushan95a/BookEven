@@ -44,11 +44,20 @@ const bootApp = async (replSet, uri) => {
     process.env.JWT_SECRET = crypto.randomBytes(48).toString('hex');
     process.env.NODE_ENV = 'test';
 
+    // Recorded instead of sent. Set `emailControl.fail = true` to simulate the mail
+    // server being down: the stubs then return false, exactly like the real ones.
     const emails = [];
+    const emailControl = { fail: false };
+    const record = (entry) => {
+        const delivered = !emailControl.fail;
+        emails.push({ ...entry, delivered });
+        return delivered;
+    };
     const email = require('../utils/email');
-    email.sendOTPEmail = async (to, code, type) => { emails.push({ to, code, type }); };
-    email.sendBookingEmail = async (to, name, title) => { emails.push({ to, type: 'confirmed', name, title }); };
-    email.sendEventCancelledEmail = async (to, name, title) => { emails.push({ to, type: 'event_cancelled', name, title }); };
+    email.sendOTPEmail = async (to, code, type) => record({ to, code, type });
+    email.sendBookingEmail = async (to, name, title) => record({ to, type: 'confirmed', name, title });
+    email.sendEventCancelledEmail = async (to, name, title) => record({ to, type: 'event_cancelled', name, title });
+    email.sendBookingRejectedEmail = async (to, name, title, reason) => record({ to, type: 'rejected', name, title, reason });
 
     const mongoose = require('mongoose');
     const jwt = require('jsonwebtoken');
@@ -76,7 +85,7 @@ const bootApp = async (replSet, uri) => {
         const res = await fetch(base + url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
         let data = null;
         try { data = await res.json(); } catch { /* empty body */ }
-        return { status: res.status, data };
+        return { status: res.status, data, headers: res.headers };
     };
 
     let userCount = 0;
@@ -97,7 +106,7 @@ const bootApp = async (replSet, uri) => {
         userId: user._id, eventId: event._id, status: 'pending', amount: event.ticketPrice,
         eventSnapshot: { title: event.title, date: event.date }, ...overrides
     });
-    const lastCode = (to, type) => [...emails].reverse().find((e) => e.to === to && e.type === type)?.code;
+    const lastCode = (to, type) => [...emails].reverse().find((e) => e.to === to && e.type === type && e.delivered)?.code;
 
     const stop = async () => {
         server.closeAllConnections();
@@ -107,7 +116,7 @@ const bootApp = async (replSet, uri) => {
     };
 
     return {
-        uri, base, api, emails, lastCode, mongoose, models: { User, Event, Booking, OTP },
+        uri, base, api, emails, emailControl, lastCode, mongoose, models: { User, Event, Booking, OTP },
         makeUser, makeAdmin, makeEvent, makeBooking, tokenFor, stop
     };
 };

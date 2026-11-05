@@ -30,8 +30,9 @@ const isExpired = (record) => Date.now() - record.createdAt.getTime() > OTP_TTL_
 const issueOTP = async (rawEmail, action) => {
     const email = normalizeEmail(rawEmail);
     const existing = await OTP.findOne({ email, action });
-    if (existing && !isExpired(existing) && Date.now() - existing.createdAt.getTime() < RESEND_COOLDOWN_MS) {
-        return { sent: false };
+    const age = existing ? Date.now() - existing.createdAt.getTime() : Infinity;
+    if (existing && !isExpired(existing) && age < RESEND_COOLDOWN_MS) {
+        return { sent: false, retryAfterSeconds: Math.ceil((RESEND_COOLDOWN_MS - age) / 1000) };
     }
 
     const code = generateCode();
@@ -70,4 +71,30 @@ const consumeOTP = async (rawEmail, action, code) => {
     return deletedCount === 1;
 };
 
-module.exports = { issueOTP, consumeOTP, MAX_ATTEMPTS, RESEND_COOLDOWN_MS };
+// Removes the current code, e.g. when its email could not be sent, so the user can
+// ask for a new one straight away instead of waiting out the resend cooldown.
+const discardOTP = async (rawEmail, action) => {
+    await OTP.deleteMany({ email: normalizeEmail(rawEmail), action });
+};
+
+/**
+ * Issues a code and emails it.
+ * @returns {{ status: 'sent' } | { status: 'cooldown', retryAfterSeconds: number } | { status: 'failed' }}
+ *   'cooldown' means a code went out under a minute ago and is still valid.
+ *   'failed' means the email could not be sent; the code is discarded.
+ */
+const deliverOTP = async (email, action) => {
+    const otp = await issueOTP(email, action);
+    if (!otp.sent) return { status: 'cooldown', retryAfterSeconds: otp.retryAfterSeconds };
+    // Looked up at call time so the mailer can be swapped (tests stub it).
+    const sent = await require('./email').sendOTPEmail(normalizeEmail(email), otp.code, action);
+    if (!sent) {
+        await discardOTP(email, action);
+        return { status: 'failed' };
+    }
+    return { status: 'sent' };
+};
+
+const EMAIL_FAILED_MESSAGE = 'We could not send the email with your code right now. Please try again in a few minutes.';
+
+module.exports = { issueOTP, consumeOTP, discardOTP, deliverOTP, EMAIL_FAILED_MESSAGE, MAX_ATTEMPTS, RESEND_COOLDOWN_MS };

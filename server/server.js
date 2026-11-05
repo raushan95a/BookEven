@@ -29,6 +29,10 @@ const start = async () => {
         throw new Error('This MongoDB deployment does not support transactions. Use MongoDB Atlas or a replica set.');
     }
 
+    if (!require('./utils/email').isEmailConfigured()) {
+        console.warn('Warning: EMAIL_USER / EMAIL_PASS are not set. Verification codes and notifications cannot be emailed.');
+    }
+
     const app = createApp(config);
     app.listen(config.port, () => console.log(`Server running on port ${config.port}`));
 };

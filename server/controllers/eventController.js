@@ -15,6 +15,7 @@ const {
 
 const MAX_SEATS = 1000000;
 const MAX_PRICE = 10000000;
+const WHEN_VALUES = ['all', 'upcoming', 'past'];
 
 // Builds a clean event object from the request, field by field. Fields that are not
 // listed here (availableSeats, createdBy, _id, ...) can never be set by a request.
@@ -22,7 +23,12 @@ const parseEventInput = (body, { partial }) => {
     const fields = {
         title: (v) => requireString(v, 'Title', { max: 200 }),
         description: (v) => requireString(v, 'Description', { max: 5000 }),
-        date: (v) => requireDate(v, 'Date'),
+        date: (v) => {
+            const date = requireDate(v, 'Date');
+            // An event (new or moved) must start in the future, or nobody could book it.
+            if (date.getTime() <= Date.now()) throw new HttpError(400, 'Date must be in the future');
+            return date;
+        },
         location: (v) => requireString(v, 'Location', { max: 200 }),
         category: (v) => requireString(v, 'Category', { max: 50 }),
         totalSeats: (v) => requireNumber(v, 'Total seats', { min: 1, max: MAX_SEATS, integer: true }),
@@ -53,12 +59,28 @@ exports.getEvents = async (req, res, next) => {
         const filters = {};
         const category = optionalString(req.query.category, 'Category', { max: 50 });
         const search = optionalString(req.query.search, 'Search', { max: 100 });
+        const when = optionalString(req.query.when, 'when', { max: 10 }) || 'all';
+        if (!WHEN_VALUES.includes(when)) throw new HttpError(400, `when must be one of: ${WHEN_VALUES.join(', ')}`);
         if (category) filters.category = category;
         // Escaped so user text is matched literally and cannot be a slow regular expression.
         if (search) filters.title = mongoose.trusted({ $regex: escapeRegex(search), $options: 'i' });
 
+        // upcoming: not started yet, soonest first. past: started, most recent first.
+        // all (default): every event in its original order, as before.
+        let sort;
+        const now = new Date();
+        if (when === 'upcoming') {
+            filters.date = mongoose.trusted({ $gt: now });
+            sort = { date: 1 };
+        } else if (when === 'past') {
+            filters.date = mongoose.trusted({ $lte: now });
+            sort = { date: -1 };
+        }
+
         // Only the organiser's name is public; their email stays private.
-        const events = await Event.find(filters).populate('createdBy', 'name');
+        const query = Event.find(filters).populate('createdBy', 'name');
+        if (sort) query.sort(sort);
+        const events = await query;
         res.json(events);
     } catch (error) {
         next(error);
@@ -136,11 +158,17 @@ exports.deleteEvent = async (req, res, next) => {
         const { event, affected } = await bookingService.deleteEventWithBookings({ eventId, actorId: req.user._id });
 
         // Notify affected users after the commit. A failed email never undoes the deletion.
-        await Promise.allSettled(
+        const results = await Promise.allSettled(
             affected.map((b) => sendEventCancelledEmail(b.email, b.name, event.title))
         );
+        const emailsSent = results.filter((r) => r.status === 'fulfilled' && r.value === true).length;
 
-        res.json({ message: 'Event deleted successfully', cancelledBookings: affected.length });
+        res.json({
+            message: 'Event deleted successfully',
+            cancelledBookings: affected.length,
+            emailsSent,
+            emailsFailed: affected.length - emailsSent
+        });
     } catch (error) {
         next(error);
     }

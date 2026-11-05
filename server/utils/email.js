@@ -12,40 +12,48 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-const sendBookingEmail = async (userEmail, userName, eventTitle) => {
+const isEmailConfigured = () => Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+
+// Subjects are plain text: strip line breaks so user text can't add email headers.
+const oneLine = (text) => String(text).replace(/[\r\n]/g, ' ');
+
+/**
+ * Sends one email. Every send function returns true when the mail server accepted
+ * the message and false when it failed, so callers can tell the user instead of
+ * pretending it worked. Failures are logged without the message body.
+ */
+const deliver = async (label, mailOptions) => {
     try {
-        // Names and titles are user-supplied: escape them before putting them in HTML.
-        const safeName = escapeHtml(userName);
-        const safeTitle = escapeHtml(eventTitle);
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: userEmail,
-            subject: `Booking Confirmed: ${String(eventTitle).replace(/[\r\n]/g, ' ')}`,
-            html: `
-        <h2>Hi ${safeName}!</h2>
-        <p>Your booking for the event <strong>${safeTitle}</strong> is successfully confirmed.</p>
-        <p>Thank you for choosing BookEven.</p>
-      `
-        };
-        await transporter.sendMail(mailOptions);
-        console.log('Email sent successfully to', userEmail);
+        await transporter.sendMail({ from: process.env.EMAIL_USER, ...mailOptions });
+        console.log(`${label} email sent to`, mailOptions.to);
+        return true;
     } catch (error) {
-        console.error('Error sending email:', error);
+        console.error(`Error sending ${label} email to ${mailOptions.to}:`, error.code || '', error.message);
+        return false;
     }
 };
 
-const sendOTPEmail = async (userEmail, otp, type) => {
-    try {
-        const title = type === 'account_verification' ? 'Verify your BookEven Account' : 'BookEven Booking Verification';
-        const msg = type === 'account_verification'
-            ? 'Please use the following OTP to verify your new BookEven account.'
-            : 'Please use the following OTP to verify and confirm your event booking.';
+const sendBookingEmail = (userEmail, userName, eventTitle) => deliver('Booking confirmation', {
+    to: userEmail,
+    subject: `Booking Confirmed: ${oneLine(eventTitle)}`,
+    // Names and titles are user-supplied: escape them before putting them in HTML.
+    html: `
+        <h2>Hi ${escapeHtml(userName)}!</h2>
+        <p>Your booking for the event <strong>${escapeHtml(eventTitle)}</strong> is successfully confirmed.</p>
+        <p>Thank you for choosing BookEven.</p>
+      `
+});
 
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: userEmail,
-            subject: title,
-            html: `
+const sendOTPEmail = (userEmail, otp, type) => {
+    const title = type === 'account_verification' ? 'Verify your BookEven Account' : 'BookEven Booking Verification';
+    const msg = type === 'account_verification'
+        ? 'Please use the following OTP to verify your new BookEven account.'
+        : 'Please use the following OTP to verify and confirm your event booking.';
+
+    return deliver('OTP', {
+        to: userEmail,
+        subject: title,
+        html: `
                 <div style="font-family: Arial, sans-serif; text-align: center; padding: 20px;">
                     <h2 style="color: #111;">${title}</h2>
                     <p style="color: #555; font-size: 16px;">${msg}</p>
@@ -55,34 +63,38 @@ const sendOTPEmail = async (userEmail, otp, type) => {
                     <p style="color: #999; font-size: 12px;">This code expires in 5 minutes. If you didn't request this, please ignore this email.</p>
                 </div>
             `
-        };
-        await transporter.sendMail(mailOptions);
-        console.log(`OTP sent to ${userEmail} for ${type}`);
-    } catch (error) {
-        console.error('Error sending OTP email:', error);
-    }
+    });
 };
 
 // Sent when an admin deletes an event that this user had a pending or confirmed booking for.
-const sendEventCancelledEmail = async (userEmail, userName, eventTitle) => {
-    try {
-        const safeName = escapeHtml(userName);
-        const safeTitle = escapeHtml(eventTitle);
-        await transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: userEmail,
-            subject: `Event Cancelled: ${String(eventTitle).replace(/[\r\n]/g, ' ')}`,
-            html: `
-        <h2>Hi ${safeName},</h2>
-        <p>Unfortunately the event <strong>${safeTitle}</strong> has been cancelled by the organiser, and your booking has been cancelled with it.</p>
+const sendEventCancelledEmail = (userEmail, userName, eventTitle) => deliver('Event cancellation', {
+    to: userEmail,
+    subject: `Event Cancelled: ${oneLine(eventTitle)}`,
+    html: `
+        <h2>Hi ${escapeHtml(userName)},</h2>
+        <p>Unfortunately the event <strong>${escapeHtml(eventTitle)}</strong> has been cancelled by the organiser, and your booking has been cancelled with it.</p>
         <p>If you paid for this booking, the organiser will contact you about a refund.</p>
         <p>Thank you for using BookEven.</p>
       `
-        });
-        console.log('Event cancellation email sent to', userEmail);
-    } catch (error) {
-        console.error('Error sending event cancellation email:', error);
-    }
-};
+});
 
-module.exports = { sendBookingEmail, sendOTPEmail, sendEventCancelledEmail };
+// Sent when an admin declines a pending booking request.
+const sendBookingRejectedEmail = (userEmail, userName, eventTitle, reason) => deliver('Booking rejection', {
+    to: userEmail,
+    subject: `Booking Request Declined: ${oneLine(eventTitle)}`,
+    html: `
+        <h2>Hi ${escapeHtml(userName)},</h2>
+        <p>Your booking request for <strong>${escapeHtml(eventTitle)}</strong> was not approved by the organiser.</p>
+        ${reason ? `<p><strong>Reason:</strong> ${escapeHtml(reason)}</p>` : ''}
+        <p>You can request a seat again from the event page if seats are still available.</p>
+        <p>Thank you for using BookEven.</p>
+      `
+});
+
+module.exports = {
+    isEmailConfigured,
+    sendBookingEmail,
+    sendOTPEmail,
+    sendEventCancelledEmail,
+    sendBookingRejectedEmail
+};

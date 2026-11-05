@@ -1,14 +1,13 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { sendOTPEmail } = require('../utils/email');
-const { issueOTP, consumeOTP } = require('../utils/otp');
+const { consumeOTP, deliverOTP, EMAIL_FAILED_MESSAGE } = require('../utils/otp');
 const { HttpError, requireString, requireEmail, requireLoginEmail, requireOtp } = require('../utils/validation');
 
 const generateToken = (id, role) => {
     return jwt.sign({ id, role }, process.env.JWT_SECRET, {
         algorithm: 'HS256',
-        expiresIn: process.env.JWT_EXPIRES_IN || '30d',
+        expiresIn: process.env.JWT_EXPIRES_IN || '7d',
     });
 };
 
@@ -23,10 +22,7 @@ const authResponse = (user) => ({
 // Compared against when the email is unknown, so a missing account takes as long as a wrong password.
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync('bookeven-timing-equaliser', 10);
 
-const sendVerificationCode = async (email) => {
-    const otp = await issueOTP(email, 'account_verification');
-    if (otp.sent) await sendOTPEmail(email, otp.code, 'account_verification');
-};
+const RESEND_GENERIC_MESSAGE = 'If this account still needs verification, a new code has been sent to its email.';
 
 exports.register = async (req, res, next) => {
     try {
@@ -48,7 +44,15 @@ exports.register = async (req, res, next) => {
             isVerified: false
         });
 
-        await sendVerificationCode(user.email);
+        const delivery = await deliverOTP(user.email, 'account_verification');
+        if (delivery.status === 'failed') {
+            // The account exists; the user can get a code later with "resend" or by logging in.
+            return res.status(503).json({
+                message: 'Your account was created, but we could not send the verification email right now. Please request a new code in a few minutes.',
+                accountCreated: true,
+                email: user.email
+            });
+        }
 
         res.status(201).json({
             message: 'OTP sent to email. Please verify.',
@@ -70,7 +74,11 @@ exports.login = async (req, res, next) => {
 
         // Every role, admins included, must have a verified email address.
         if (!user.isVerified) {
-            await sendVerificationCode(user.email);
+            const delivery = await deliverOTP(user.email, 'account_verification');
+            if (delivery.status === 'failed') {
+                return res.status(503).json({ message: EMAIL_FAILED_MESSAGE });
+            }
+            // 'sent', or 'cooldown' (the code from under a minute ago is still valid).
             return res.status(403).json({ message: 'Account not verified', needsVerification: true, email: user.email });
         }
 
@@ -93,6 +101,30 @@ exports.verifyOTP = async (req, res, next) => {
         if (!user) throw new HttpError(400, 'Invalid or expired OTP');
 
         res.json(authResponse(user));
+    } catch (error) {
+        next(error);
+    }
+};
+
+// Sends a new account-verification code. The reply is the same whether or not the
+// account exists or is already verified, so it can't be used to look up accounts.
+exports.resendOTP = async (req, res, next) => {
+    try {
+        const email = requireLoginEmail(req.body.email);
+        const user = await User.findOne({ email });
+        if (!user || user.isVerified) return res.json({ message: RESEND_GENERIC_MESSAGE });
+
+        const delivery = await deliverOTP(user.email, 'account_verification');
+        if (delivery.status === 'cooldown') {
+            res.setHeader('Retry-After', delivery.retryAfterSeconds);
+            return res.status(429).json({
+                message: `A code was sent recently. Please wait ${delivery.retryAfterSeconds} seconds before asking for another.`,
+                retryAfterSeconds: delivery.retryAfterSeconds
+            });
+        }
+        if (delivery.status === 'failed') return res.status(503).json({ message: EMAIL_FAILED_MESSAGE });
+
+        res.json({ message: RESEND_GENERIC_MESSAGE });
     } catch (error) {
         next(error);
     }
