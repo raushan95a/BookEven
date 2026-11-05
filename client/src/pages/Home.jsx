@@ -107,7 +107,10 @@ const Home = () => {
                                 </div>
                             </div>
                             <div className="p-6 flex-grow flex flex-col">
-                                <div className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">{event.category}</div>
+                                <div className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
+                                    {event.category}
+                                    {event.approvalMode === 'auto' && <span className="ml-2 text-blue-700">· Instant confirmation</span>}
+                                </div>
                                 <h2 className="text-xl font-bold text-gray-800 mb-3">{event.title}</h2>
                                 <div className="flex flex-col gap-2 mb-4 text-gray-600 text-sm">
                                     <div className="flex items-center gap-2">

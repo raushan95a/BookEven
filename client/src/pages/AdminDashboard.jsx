@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { formatDateTime, toDateTimeLocalValue, fromDateTimeLocalValue, hasStarted } from '../utils/format';
 
 const PAGE_SIZE = 20;
-const EMPTY_FORM = { title: '', description: '', date: '', location: '', category: '', totalSeats: '', ticketPrice: '', image: '' };
+const EMPTY_FORM = { title: '', description: '', date: '', location: '', category: '', totalSeats: '', ticketPrice: '', image: '', approvalMode: 'manual' };
 const STATUS_OPTIONS = ['pending', 'confirmed', 'rejected', 'cancelled'];
 const inputClass = 'border px-4 py-3 rounded-lg focus:ring-2 focus:ring-gray-700 outline-none transition';
 
@@ -18,7 +18,8 @@ const eventToForm = (event) => ({
     category: event.category,
     totalSeats: String(event.totalSeats),
     ticketPrice: String(event.ticketPrice),
-    image: event.image || ''
+    image: event.image || '',
+    approvalMode: event.approvalMode || 'manual'
 });
 
 const AdminDashboard = () => {
@@ -166,6 +167,16 @@ const AdminDashboard = () => {
         }
     };
 
+    const handleMarkPaid = async (booking) => {
+        try {
+            const { data } = await api.put(`/bookings/${booking._id}/payment`, { paymentStatus: 'paid' });
+            replaceBooking(data.booking);
+            await refreshCounts();
+        } catch (error) {
+            alert(error.response?.data?.message || 'Error updating payment');
+        }
+    };
+
     const handleRejectBooking = async (booking) => {
         const reason = window.prompt(`Decline ${booking.userId?.name || 'this user'}'s request?\n\nReason (optional, shown to the user):`, '');
         if (reason === null) return; // dialog cancelled
@@ -249,6 +260,19 @@ const AdminDashboard = () => {
                         <input required type="number" min="0" step="any" aria-label="Ticket price" placeholder="Ticket Price (0 for free)" className={inputClass} value={formData.ticketPrice} onChange={e => setFormData({ ...formData, ticketPrice: e.target.value })} />
 
                         <div className="md:col-span-2">
+                            <label htmlFor="approval-mode" className="block text-sm font-semibold text-gray-700 mb-2">Booking approval</label>
+                            <select id="approval-mode" className={`w-full bg-white ${inputClass}`} value={formData.approvalMode} onChange={e => setFormData({ ...formData, approvalMode: e.target.value })}>
+                                <option value="manual">Admin approves each request</option>
+                                <option value="auto">Auto-approve (confirmed instantly while seats last)</option>
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">
+                                {formData.approvalMode === 'auto'
+                                    ? 'Bookings are confirmed and take a seat immediately. For paid events, record payment later with "Mark as paid".'
+                                    : 'Each request waits in Booking Requests until you approve or reject it.'}
+                            </p>
+                        </div>
+
+                        <div className="md:col-span-2">
                             <input type="url" aria-label="Image URL" placeholder="Image URL (Provide any direct link to an image)" className={`w-full ${inputClass}`} value={formData.image} onChange={e => setFormData({ ...formData, image: e.target.value })} />
                         </div>
 
@@ -275,6 +299,7 @@ const AdminDashboard = () => {
                                         <div>
                                             <h4 className="font-bold text-gray-900 mb-1 leading-tight">
                                                 {event.title}
+                                                {event.approvalMode === 'auto' && <span className="ml-2 align-middle px-2 py-0.5 text-[10px] font-black rounded uppercase tracking-wider bg-blue-100 text-blue-700">Auto-approve</span>}
                                                 {hasStarted(event.date) && <span className="ml-2 align-middle px-2 py-0.5 text-[10px] font-black rounded uppercase tracking-wider bg-gray-200 text-gray-600">Past</span>}
                                             </h4>
                                             <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
@@ -358,6 +383,12 @@ const AdminDashboard = () => {
                                                     </p>
                                                 )}
                                             </div>
+
+                                            {booking.status === 'confirmed' && booking.paymentStatus === 'not_paid' && booking.amount > 0 && (
+                                                <button onClick={() => handleMarkPaid(booking)} className="w-full mt-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-200 text-xs font-bold py-2.5 px-3 rounded-lg shadow-sm transition">
+                                                    ₹ Mark as paid
+                                                </button>
+                                            )}
 
                                             {/* Action buttons for admin */}
                                             {booking.status === 'pending' && (

@@ -71,12 +71,19 @@ const EventDetail = () => {
                     : 'OTP sent to your email. Please verify to confirm booking.');
             } else {
                 const { data } = await api.post('/bookings', { eventId: event._id, otp });
-                // Seats are only taken when the organiser approves, so the count shown stays as it is.
                 setMyBooking(data.booking);
                 setDeclined(null);
                 setShowOTP(false);
                 setOtp('');
-                setSuccessMsg('Booking requested! Awaiting admin confirmation.');
+                if (data.autoConfirmed) {
+                    // Auto-approve events take the seat now: show the new count from the server.
+                    const fresh = await api.get(`/events/${event._id}`);
+                    setEvent(fresh.data);
+                    setSuccessMsg('Booking confirmed! A confirmation email is on its way.');
+                } else {
+                    // Seats are only taken when the organiser approves, so the count shown stays as it is.
+                    setSuccessMsg('Booking requested! Awaiting admin confirmation.');
+                }
             }
         } catch (err) {
             setError(err.response?.data?.message || 'Booking failed');
@@ -111,8 +118,15 @@ const EventDetail = () => {
             <div className="p-8 md:p-12">
                 <div className="flex flex-col md:flex-row justify-between items-start mb-8 gap-6">
                     <div>
-                        <div className="inline-block bg-gray-200 text-gray-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide mb-3">
-                            {event.category}
+                        <div className="flex flex-wrap gap-2 mb-3">
+                            <div className="inline-block bg-gray-200 text-gray-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">
+                                {event.category}
+                            </div>
+                            {event.approvalMode === 'auto' && (
+                                <div className="inline-block bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">
+                                    Instant confirmation
+                                </div>
+                            )}
                         </div>
                         <h1 className="text-4xl font-extrabold text-gray-900 mb-4">{event.title}</h1>
                         <p className="text-gray-600 text-lg leading-relaxed mb-6">{event.description}</p>

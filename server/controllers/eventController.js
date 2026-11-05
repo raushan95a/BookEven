@@ -16,6 +16,7 @@ const {
 const MAX_SEATS = 1000000;
 const MAX_PRICE = 10000000;
 const WHEN_VALUES = ['all', 'upcoming', 'past'];
+const APPROVAL_MODES = ['manual', 'auto'];
 
 // Builds a clean event object from the request, field by field. Fields that are not
 // listed here (availableSeats, createdBy, _id, ...) can never be set by a request.
@@ -33,7 +34,11 @@ const parseEventInput = (body, { partial }) => {
         category: (v) => requireString(v, 'Category', { max: 50 }),
         totalSeats: (v) => requireNumber(v, 'Total seats', { min: 1, max: MAX_SEATS, integer: true }),
         ticketPrice: (v) => requireNumber(v, 'Ticket price', { min: 0, max: MAX_PRICE }),
-        image: (v) => optionalUrl(v, 'Image URL') || ''
+        image: (v) => optionalUrl(v, 'Image URL') || '',
+        approvalMode: (v) => {
+            if (!APPROVAL_MODES.includes(v)) throw new HttpError(400, `approvalMode must be one of: ${APPROVAL_MODES.join(', ')}`);
+            return v;
+        }
     };
 
     const result = {};
@@ -47,6 +52,10 @@ const parseEventInput = (body, { partial }) => {
         }
         if (isBlank && field === 'image') {
             result.image = '';
+            continue;
+        }
+        if (isBlank && field === 'approvalMode') {
+            result.approvalMode = 'manual';
             continue;
         }
         result[field] = parse(value);

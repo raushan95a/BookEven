@@ -329,7 +329,7 @@
                         },
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"title\": \"Tech Conference\",\n    \"description\": \"A conference for developers.\",\n    \"date\": \"2027-03-15T18:30:00.000Z\",\n    \"location\": \"Convention Center\",\n    \"category\": \"Technology\",\n    \"totalSeats\": 100,\n    \"ticketPrice\": 500,\n    \"image\": \"\"\n}",
+                            "raw": "{\n    \"title\": \"Tech Conference\",\n    \"description\": \"A conference for developers.\",\n    \"date\": \"2027-03-15T18:30:00.000Z\",\n    \"location\": \"Convention Center\",\n    \"category\": \"Technology\",\n    \"totalSeats\": 100,\n    \"ticketPrice\": 500,\n    \"image\": \"\",\n    \"approvalMode\": \"manual\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -345,7 +345,7 @@
                                 "events"
                             ]
                         },
-                        "description": "date must be in the future (ISO 8601, with time). ticketPrice 0 = free. Saves event_id."
+                        "description": "date must be in the future (ISO 8601, with time). ticketPrice 0 = free. approvalMode: 'manual' (admin approves each request, default) or 'auto' (confirmed instantly while seats last). Saves event_id."
                     }
                 },
                 {
@@ -500,7 +500,7 @@
                                 "bookings"
                             ]
                         },
-                        "description": "Creates a pending booking. Fails if the event has started, is sold out, or the user already has a pending/confirmed booking for it. Saves booking_id."
+                        "description": "Creates a pending booking, or a confirmed one (autoConfirmed: true) on auto-approve events. Fails if the event has started, is sold out, or the user already has a pending/confirmed booking for it. Saves booking_id."
                     }
                 },
                 {
@@ -688,6 +688,49 @@
                             ]
                         },
                         "description": "paymentStatus: 'paid' or 'not_paid'. Takes a seat. emailSent tells whether the confirmation email went out."
+                    }
+                },
+                {
+                    "name": "Mark as paid",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"paymentStatus\": \"paid\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/bookings/{{booking_id}}/payment",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "{{booking_id}}",
+                                "payment"
+                            ]
+                        },
+                        "description": "Records payment on a confirmed booking (e.g. an auto-approved paid booking settled at the door). paymentStatus: 'paid' or 'not_paid'."
                     }
                 },
                 {

@@ -6,10 +6,11 @@ BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. 
 - **Accounts**: registration with email verification code, login with JWT (valid 7 days), bcrypt-hashed passwords. Emails are case-insensitive.
 - **Email codes (OTP)**: 6-digit codes, valid 5 minutes, single use, 5 attempts per code, "Resend code" after 60 seconds.
 - **Roles**:
-  - **Admin**: create, edit and delete events; approve requests as *Paid* or *Not paid*; decline requests with an optional reason; see revenue, paid clients and pending requests; filter and page through all bookings.
+  - **Admin**: create, edit and delete events; choose per event whether requests need approval or are **auto-approved**; approve requests as *Paid* or *Not paid*; mark confirmed bookings as paid later; decline requests with an optional reason; see revenue, paid clients and pending requests; filter and page through all bookings.
   - **User**: browse upcoming events, request a seat with an email code, see status and reasons in *My Bookings*, cancel, and request again after a decline.
 - **Booking rules**:
-  - A seat is taken only when an admin approves; approvals can never overbook, even when several happen at once.
+  - Each event has a **booking approval** setting: *Admin approves each request* (default) or *Auto-approve*, where a request is confirmed and takes a seat immediately. Free auto-approved bookings count as paid; paid ones are marked paid by the admin later.
+  - On approval-required events a seat is taken only when an admin approves. Neither mode can overbook, even when many people book at once.
   - One pending/confirmed booking per user per event (enforced by the database).
   - Booking closes when the event starts.
   - Approve, cancel, decline and event deletion each run in a MongoDB transaction: all of it happens or none of it does.
@@ -90,7 +91,8 @@ Runs every automated test (about 25 seconds) against **in-memory MongoDB replica
 - the original 102 security and booking checks (`tests/legacy/phase1-checks.js`),
 - database integrity: duplicate prevention, transaction rollback, concurrent approvals and cancellations, event deletion (`tests/wp1.integrity.test.js`),
 - the data migration script (`tests/wp1.migration.test.js`),
-- every API endpoint, email failure handling, pagination, stats and a full user journey (`tests/wp2.api.test.js`).
+- every API endpoint, email failure handling, pagination, stats and a full user journey (`tests/wp2.api.test.js`),
+- auto-approval: instant confirmation, last-seat races, rollback and recording payment (`tests/auto-approval.test.js`).
 
 Build check for the client: `cd client && npm run build`.
 
@@ -117,17 +119,18 @@ Base URL: `http://localhost:5000/api`. Authenticated requests send `Authorizatio
 | POST | `/auth/login` | Public | Log in; `403 needsVerification` for unverified accounts |
 | GET | `/events?when=upcoming\|past\|all&search=&category=` | Public | List events (`upcoming`: soonest first) |
 | GET | `/events/:id` | Public | Event details |
-| POST | `/events` | Admin | Create event (date must be in the future) |
-| PUT | `/events/:id` | Admin | Update any of: title, description, date, location, category, totalSeats, ticketPrice, image |
+| POST | `/events` | Admin | Create event (date must be in the future; `approvalMode`: `manual` (default) or `auto`) |
+| PUT | `/events/:id` | Admin | Update any of: title, description, date, location, category, totalSeats, ticketPrice, image, approvalMode |
 | DELETE | `/events/:id` | Admin | Delete event, cancel its active bookings, email users |
 | POST | `/bookings/send-otp` | User | Email a booking code |
-| POST | `/bookings` | User | Request a seat: `{ eventId, otp }` |
+| POST | `/bookings` | User | Request a seat: `{ eventId, otp }`. Pending, or confirmed at once (`autoConfirmed: true`) on auto-approve events |
 | GET | `/bookings/my` | User | The caller's own bookings |
 | DELETE | `/bookings/:id` | Owner / Admin | Cancel; a confirmed seat is returned |
 | GET | `/bookings?page=&limit=&status=&eventId=` | Admin | All bookings, newest first, 20 per page (max 100) |
 | GET | `/bookings/stats?eventId=` | Admin | Revenue, paid clients, counts by status |
 | PUT | `/bookings/:id/confirm` | Admin | Approve: `{ paymentStatus: "paid" \| "not_paid" }` |
 | PUT | `/bookings/:id/reject` | Admin | Decline: `{ reason? }` (max 500 characters) |
+| PUT | `/bookings/:id/payment` | Admin | Record payment on a confirmed booking: `{ paymentStatus: "paid" | "not_paid" }` |
 
 Booking statuses: `pending` → `confirmed` or `rejected`; `pending`/`confirmed` → `cancelled`.
 

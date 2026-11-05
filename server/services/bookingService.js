@@ -12,6 +12,79 @@ const EVENT_DELETED_REASON = 'Event deleted by organiser';
 // so a crash or error part-way leaves the database exactly as it was before.
 // Functions return plain data; emails are sent by the caller after the commit.
 
+// Booking closes when the event starts.
+const hasEventStarted = (event) => event.date.getTime() <= Date.now();
+
+/**
+ * Creates a booking request for an event, in one transaction.
+ * - 'manual' events: the booking is 'pending' and takes no seat until an admin approves.
+ * - 'auto' events: the booking is 'confirmed' at once and takes a seat in the same
+ *   transaction, so auto-approval can never overbook either.
+ * @returns the booking (event populated) and whether it was auto-confirmed
+ */
+const createBooking = async ({ user, eventId }) => {
+    const bookingId = await withTransaction(async (session) => {
+        const event = await Event.findById(eventId).session(session);
+        if (!event) throw new HttpError(404, 'Event not found');
+        if (hasEventStarted(event)) throw new HttpError(400, 'This event has already started');
+        if (event.availableSeats <= 0) throw new HttpError(400, 'No seats available');
+
+        const auto = event.approvalMode === 'auto';
+        if (auto) {
+            const taken = await Event.findOneAndUpdate(
+                { _id: eventId, availableSeats: mongoose.trusted({ $gt: 0 }) },
+                { $inc: { availableSeats: -1 } },
+                { new: true, session }
+            );
+            if (!taken) throw new HttpError(400, 'No seats available');
+        }
+
+        const now = new Date();
+        const doc = {
+            userId: user._id,
+            eventId,
+            status: auto ? 'confirmed' : 'pending',
+            // A free event has nothing to pay; a paid one is settled later ("Mark as paid").
+            paymentStatus: auto && event.ticketPrice === 0 ? 'paid' : 'not_paid',
+            amount: event.ticketPrice,
+            eventSnapshot: { title: event.title, date: event.date },
+            ...(auto ? { statusChangedAt: now, statusReason: 'Auto-approved' } : {})
+        };
+        try {
+            const [booking] = await Booking.create([doc], { session });
+            return booking._id;
+        } catch (error) {
+            // The unique index caught a second active booking made at the same moment.
+            if (error.code === 11000) throw new HttpError(400, 'Already booked or pending');
+            throw error;
+        }
+    });
+
+    const booking = await Booking.findById(bookingId).populate('eventId');
+    return { booking, autoConfirmed: booking.status === 'confirmed' };
+};
+
+/**
+ * Records payment on a confirmed booking, e.g. a paid auto-approved booking settled at the door.
+ */
+const setPaymentStatus = async ({ bookingId, paymentStatus }) => {
+    if (!PAYMENT_STATUSES.includes(paymentStatus)) {
+        throw new HttpError(400, "paymentStatus must be 'paid' or 'not_paid'");
+    }
+    const updated = await Booking.findOneAndUpdate(
+        { _id: bookingId, status: 'confirmed' },
+        { paymentStatus },
+        { new: true }
+    ).populate('userId', 'name email').populate('eventId');
+    if (!updated) {
+        const exists = await Booking.exists({ _id: bookingId });
+        throw exists
+            ? new HttpError(400, 'Payment can only be recorded on a confirmed booking')
+            : new HttpError(404, 'Booking not found');
+    }
+    return updated;
+};
+
 /**
  * Approves a pending booking and takes one seat.
  * @returns the confirmed booking with user (name, email) and event populated
@@ -163,6 +236,8 @@ const deleteEventWithBookings = async ({ eventId, actorId }) => {
 };
 
 module.exports = {
+    createBooking,
+    setPaymentStatus,
     confirmBooking,
     cancelBooking,
     rejectBooking,

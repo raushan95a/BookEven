@@ -4,6 +4,7 @@ const {
     bookEvent,
     confirmBooking,
     rejectBooking,
+    updatePaymentStatus,
     getMyBookings,
     listBookings,
     getBookingStats,
@@ -26,6 +27,7 @@ router.post('/send-otp', protect, bookingOtpLimiter, sendBookingOTP);
 router.post('/', protect, bookingLimiter, bookEvent);
 router.put('/:id/confirm', protect, admin, confirmBooking);
 router.put('/:id/reject', protect, admin, rejectBooking);
+router.put('/:id/payment', protect, admin, updatePaymentStatus);
 router.get('/my', protect, getMyBookings);
 router.delete('/:id', protect, cancelBooking);
 

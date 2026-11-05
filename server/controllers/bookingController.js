@@ -51,24 +51,14 @@ exports.bookEvent = async (req, res, next) => {
         const isValid = await consumeOTP(req.user.email, 'event_booking', otp);
         if (!isValid) throw new HttpError(400, 'Invalid or expired OTP for booking');
 
-        let booking;
-        try {
-            booking = await Booking.create({
-                userId: req.user._id,
-                eventId,
-                status: 'pending',
-                paymentStatus: 'not_paid',
-                amount: event.ticketPrice,
-                eventSnapshot: { title: event.title, date: event.date }
-            });
-        } catch (error) {
-            // The database's unique index caught a duplicate that slipped past the check above
-            // (two requests at the same moment).
-            if (error.code === 11000) throw new HttpError(400, 'Already booked or pending');
-            throw error;
-        }
+        // Pending for 'manual' events; confirmed with a seat taken for 'auto' events.
+        const { booking, autoConfirmed } = await bookingService.createBooking({ user: req.user, eventId });
 
-        res.status(201).json({ message: 'Booking request submitted', booking });
+        if (!autoConfirmed) {
+            return res.status(201).json({ message: 'Booking request submitted', booking });
+        }
+        const emailSent = await sendBookingEmail(req.user.email, req.user.name, booking.eventId.title);
+        res.status(201).json({ message: 'Booking confirmed', booking, autoConfirmed: true, emailSent });
     } catch (error) {
         next(error);
     }
@@ -91,6 +81,17 @@ exports.confirmBooking = async (req, res, next) => {
         }
 
         res.json({ message: 'Booking confirmed successfully', booking: confirmed, emailSent });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// PUT /api/bookings/:id/payment (admin) — record payment on a confirmed booking.
+exports.updatePaymentStatus = async (req, res, next) => {
+    try {
+        const bookingId = requireObjectId(req.params.id, 'booking id');
+        const booking = await bookingService.setPaymentStatus({ bookingId, paymentStatus: req.body.paymentStatus });
+        res.json({ message: 'Payment status updated', booking });
     } catch (error) {
         next(error);
     }
