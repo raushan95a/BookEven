@@ -117,13 +117,11 @@ exports.rejectBooking = async (req, res, next) => {
     }
 };
 
-// GET /api/bookings/my — the caller's bookings. Admins still receive every booking here
-// until the admin dashboard moves to GET /api/bookings (kept for compatibility).
+// GET /api/bookings/my — the caller's own bookings, for every role.
+// Admins list all bookings with GET /api/bookings.
 exports.getMyBookings = async (req, res, next) => {
     try {
-        const bookings = req.user.role === 'admin'
-            ? await Booking.find().populate('eventId').populate('userId', 'name email').sort({ createdAt: -1 })
-            : await Booking.find({ userId: req.user._id }).populate('eventId').sort({ createdAt: -1 });
+        const bookings = await Booking.find({ userId: req.user._id }).populate('eventId').sort({ createdAt: -1 });
         res.json(bookings);
     } catch (error) {
         next(error);

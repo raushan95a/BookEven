@@ -236,13 +236,17 @@ describe('2.4 admin bookings list', () => {
         assert.equal((await t.api('GET', '/bookings')).status, 401);
     });
 
-    test('/bookings/my: users see only their own; admins still see all (until the dashboard moves)', async () => {
+    test('/bookings/my returns only the caller\'s own bookings, admins included', async () => {
         const user = await t.makeUser();
         await t.makeBooking(user, eventB);
         let r = await t.api('GET', '/bookings/my', { token: t.tokenFor(user) });
         assert.equal(r.data.length, 1);
         r = await t.api('GET', '/bookings/my', { token: t.tokenFor(admin) });
-        assert.equal(r.data.length, await t.models.Booking.countDocuments());
+        assert.equal(r.status, 200);
+        assert.equal(r.data.length, 0, 'admin has no bookings of their own');
+        await t.makeBooking(admin, eventB);
+        r = await t.api('GET', '/bookings/my', { token: t.tokenFor(admin) });
+        assert.equal(r.data.length, 1);
     });
 });
 

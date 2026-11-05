@@ -1,11 +1,17 @@
-import React, { createContext, useState, useEffect } from 'react';
-import api from '../utils/axios';
+import React, { createContext, useState, useEffect, useCallback } from 'react';
+import api, { setUnauthorizedHandler } from '../utils/axios';
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+
+    const logout = useCallback(() => {
+        setUser(null);
+        localStorage.removeItem('userInfo');
+        localStorage.removeItem('token');
+    }, []);
 
     useEffect(() => {
         const userInfo = localStorage.getItem('userInfo');
@@ -14,6 +20,17 @@ export const AuthProvider = ({ children }) => {
         }
         setLoading(false);
     }, []);
+
+    // An expired or invalid session: clear it and send the user to log in again.
+    useEffect(() => {
+        setUnauthorizedHandler(() => {
+            logout();
+            if (window.location.pathname !== '/login') {
+                window.location.replace('/login?expired=1');
+            }
+        });
+        return () => setUnauthorizedHandler(null);
+    }, [logout]);
 
     const login = async (email, password) => {
         try {
@@ -33,6 +50,8 @@ export const AuthProvider = ({ children }) => {
             const { data } = await api.post('/auth/register', { name, email, password });
             return data; // Returns { message, email }
         } catch (error) {
+            // Account created but the code email failed: the caller shows the code step with "Resend".
+            if (error.response?.data?.accountCreated) throw error.response.data;
             throw error.response?.data?.message || 'Registration failed';
         }
     };
@@ -47,12 +66,6 @@ export const AuthProvider = ({ children }) => {
         } catch (error) {
             throw error.response?.data?.message || 'OTP verification failed';
         }
-    };
-
-    const logout = () => {
-        setUser(null);
-        localStorage.removeItem('userInfo');
-        localStorage.removeItem('token');
     };
 
     return (

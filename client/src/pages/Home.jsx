@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../utils/axios';
+import { formatDateTimeLong } from '../utils/format';
 import { FaCalendarAlt, FaMapMarkerAlt, FaSearch, FaRegClock, FaTicketAlt, FaShieldAlt } from 'react-icons/fa';
 
 const Home = () => {
@@ -17,7 +18,8 @@ const Home = () => {
 
     const fetchEvents = async () => {
         try {
-            const { data } = await api.get(`/events?search=${search}`);
+            // axios encodes the params, so characters like & # + in the search box are safe.
+            const { data } = await api.get('/events', { params: { search: search.trim() || undefined, when: 'upcoming' } });
             setEvents(data);
         } catch (error) {
             console.error('Error fetching events:', error);
@@ -110,7 +112,7 @@ const Home = () => {
                                 <div className="flex flex-col gap-2 mb-4 text-gray-600 text-sm">
                                     <div className="flex items-center gap-2">
                                         <FaCalendarAlt className="text-gray-400" />
-                                        <span>{new Date(event.date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                                        <span>{formatDateTimeLong(event.date)}</span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <FaMapMarkerAlt className="text-gray-400" />
@@ -119,7 +121,7 @@ const Home = () => {
                                 </div>
                                 <div className="mt-auto">
                                     <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                                        <div className="bg-gray-700 h-2 rounded-full" style={{ width: `${(event.availableSeats / event.totalSeats) * 100}%` }}></div>
+                                        <div className="bg-gray-700 h-2 rounded-full" style={{ width: `${event.totalSeats > 0 ? Math.min(100, Math.max(0, (event.availableSeats / event.totalSeats) * 100)) : 0}%` }}></div>
                                     </div>
                                     <p className="text-xs text-gray-500 mb-4">{event.availableSeats} of {event.totalSeats} seats remaining</p>
                                     <Link to={`/events/${event._id}`} className="block w-full text-center bg-gray-100 hover:bg-gray-200 text-gray-900 font-semibold py-2 rounded-lg transition">

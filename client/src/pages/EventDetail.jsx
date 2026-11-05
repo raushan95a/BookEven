@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../utils/axios';
 import { AuthContext } from '../context/AuthContext';
+import { formatDateTimeLong, hasStarted } from '../utils/format';
+import ResendCodeButton from '../components/ResendCodeButton';
 import { FaCalendarAlt, FaMapMarkerAlt, FaChair, FaMoneyBillWave } from 'react-icons/fa';
+
+const ACTIVE_STATUSES = ['pending', 'confirmed'];
 
 const EventDetail = () => {
     const { id } = useParams();
@@ -15,6 +19,10 @@ const EventDetail = () => {
     const [showOTP, setShowOTP] = useState(false);
     const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
+    // The signed-in user's pending/confirmed booking for this event, if any.
+    const [myBooking, setMyBooking] = useState(null);
+    // Their most recent declined request, shown as a note.
+    const [declined, setDeclined] = useState(null);
 
     useEffect(() => {
         const fetchEvent = async () => {
@@ -30,6 +38,21 @@ const EventDetail = () => {
         fetchEvent();
     }, [id]);
 
+    useEffect(() => {
+        if (!user) return;
+        const fetchMyBooking = async () => {
+            try {
+                const { data } = await api.get('/bookings/my');
+                const forThisEvent = data.filter((b) => (b.eventId?._id || b.eventId) === id);
+                setMyBooking(forThisEvent.find((b) => ACTIVE_STATUSES.includes(b.status)) || null);
+                setDeclined(forThisEvent.find((b) => b.status === 'rejected') || null);
+            } catch {
+                // Not critical: the server still blocks duplicate bookings.
+            }
+        };
+        fetchMyBooking();
+    }, [user, id]);
+
     const handleBooking = async () => {
         if (!user) {
             navigate('/login');
@@ -41,15 +64,19 @@ const EventDetail = () => {
 
         try {
             if (!showOTP) {
-                await api.post('/bookings/send-otp');
+                const { data } = await api.post('/bookings/send-otp');
                 setShowOTP(true);
-                setSuccessMsg('OTP sent to your email. Please verify to confirm booking.');
+                setSuccessMsg(data.retryAfterSeconds
+                    ? 'A code was sent to your email less than a minute ago. Enter it below.'
+                    : 'OTP sent to your email. Please verify to confirm booking.');
             } else {
-                await api.post('/bookings', { eventId: event._id, otp });
-                setSuccessMsg('Booking requested! Awaiting admin confirmation.');
+                const { data } = await api.post('/bookings', { eventId: event._id, otp });
+                // Seats are only taken when the organiser approves, so the count shown stays as it is.
+                setMyBooking(data.booking);
+                setDeclined(null);
                 setShowOTP(false);
-                // Update local seats count dynamically after booking
-                setEvent({ ...event, availableSeats: event.availableSeats - 1 });
+                setOtp('');
+                setSuccessMsg('Booking requested! Awaiting admin confirmation.');
             }
         } catch (err) {
             setError(err.response?.data?.message || 'Booking failed');
@@ -62,6 +89,14 @@ const EventDetail = () => {
     if (error && !event) return <div className="text-center py-20 text-xl text-red-500">{error || 'Event not found'}</div>;
 
     const isSoldOut = event.availableSeats <= 0;
+    const isClosed = hasStarted(event.date);
+    const buttonDisabled = isSoldOut || isClosed || bookingLoading || (showOTP && !otp);
+
+    let buttonLabel = 'Confirm Registration';
+    if (bookingLoading) buttonLabel = 'Processing...';
+    else if (showOTP) buttonLabel = 'Verify OTP & Confirm';
+    else if (isClosed) buttonLabel = 'Booking Closed';
+    else if (isSoldOut) buttonLabel = 'Sold Out';
 
     return (
         <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden mt-8">
@@ -83,7 +118,7 @@ const EventDetail = () => {
                         <p className="text-gray-600 text-lg leading-relaxed mb-6">{event.description}</p>
                     </div>
 
-                    <div className="bg-gray-50 p-6 rounded-xl border border-gray-100 min-w-[300px] w-full md:w-auto shrink-0 shadow-sm">
+                    <div className="bg-gray-50 p-6 rounded-xl border border-gray-100 w-full md:w-auto md:min-w-[300px] shrink-0 shadow-sm">
                         <h3 className="text-xl font-bold text-gray-800 mb-6">Booking Details</h3>
 
                         <div className="space-y-4 mb-8">
@@ -114,8 +149,8 @@ const EventDetail = () => {
                                     <FaCalendarAlt />
                                 </div>
                                 <div>
-                                    <p className="text-sm font-semibold text-gray-400 uppercase">Date</p>
-                                    <p className="font-bold text-gray-800">{new Date(event.date).toLocaleDateString()}</p>
+                                    <p className="text-sm font-semibold text-gray-400 uppercase">Date &amp; Time</p>
+                                    <p className="font-bold text-gray-800">{formatDateTimeLong(event.date)}</p>
                                 </div>
                             </div>
 
@@ -130,33 +165,67 @@ const EventDetail = () => {
                             </div>
                         </div>
 
-                        {showOTP && (
-                            <div className="mb-4">
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">Enter OTP to Confirm</label>
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="6-digit code"
-                                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-700 transition shadow-sm font-bold tracking-widest text-center text-lg"
-                                    value={otp}
-                                    onChange={(e) => setOtp(e.target.value)}
-                                    maxLength="6"
-                                />
+                        {myBooking ? (
+                            // Already requested or booked: show the status instead of the button.
+                            <div role="status" className={`p-4 rounded-xl border text-center ${myBooking.status === 'confirmed' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}>
+                                <p className="font-bold text-lg mb-1">
+                                    {myBooking.status === 'confirmed' ? "You're booked!" : 'Request pending'}
+                                </p>
+                                <p className="text-sm mb-3">
+                                    {myBooking.status === 'confirmed'
+                                        ? 'Your seat is confirmed.'
+                                        : 'The organiser will review your request and confirm your seat.'}
+                                </p>
+                                <Link to="/dashboard" className="text-sm font-semibold underline">View in My Bookings</Link>
                             </div>
-                        )}
+                        ) : (
+                            <>
+                                {declined && (
+                                    <p className="text-sm text-orange-700 bg-orange-50 border border-orange-200 p-3 rounded-lg mb-4">
+                                        Your previous request was declined{declined.statusReason ? `: ${declined.statusReason}` : '.'} You can request a seat again.
+                                    </p>
+                                )}
 
-                        <button
-                            onClick={handleBooking}
-                            disabled={isSoldOut || bookingLoading || (showOTP && !otp)}
-                            className={`w-full py-4 px-6 rounded-xl font-bold text-lg transition shadow-lg ${isSoldOut || (successMsg && !showOTP)
-                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                : 'bg-gray-900 hover:bg-black text-white hover:shadow-xl hover:-translate-y-1'
-                                }`}
-                        >
-                            {bookingLoading ? 'Processing...' : (showOTP ? 'Verify OTP & Confirm' : (successMsg && !showOTP ? 'Request Sent' : (isSoldOut ? 'Sold Out' : 'Confirm Registration')))}
-                        </button>
-                        {error && <p className="text-red-500 mt-4 text-center font-medium bg-red-50 p-2 rounded">{error}</p>}
-                        {successMsg && <p className="text-green-600 mt-4 text-center font-medium bg-green-50 p-2 rounded">{successMsg}</p>}
+                                {showOTP && (
+                                    <div className="mb-4">
+                                        <label htmlFor="booking-otp" className="block text-sm font-semibold text-gray-700 mb-2">Enter OTP to Confirm</label>
+                                        <input
+                                            id="booking-otp"
+                                            type="text"
+                                            required
+                                            inputMode="numeric"
+                                            autoComplete="one-time-code"
+                                            placeholder="6-digit code"
+                                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-gray-700 transition shadow-sm font-bold tracking-widest text-center text-lg"
+                                            value={otp}
+                                            onChange={(e) => setOtp(e.target.value)}
+                                            maxLength="6"
+                                        />
+                                        <div className="text-center mt-2">
+                                            <ResendCodeButton
+                                                onResend={async () => (await api.post('/bookings/send-otp')).data}
+                                                onMessage={(text, isError) => {
+                                                    if (isError) { setError(text); setSuccessMsg(''); } else { setSuccessMsg(text); setError(''); }
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                <button
+                                    onClick={handleBooking}
+                                    disabled={buttonDisabled}
+                                    className={`w-full py-4 px-6 rounded-xl font-bold text-lg transition shadow-lg ${isSoldOut || isClosed
+                                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                        : 'bg-gray-900 hover:bg-black text-white hover:shadow-xl hover:-translate-y-1'
+                                        }`}
+                                >
+                                    {buttonLabel}
+                                </button>
+                            </>
+                        )}
+                        {error && <p role="alert" className="text-red-500 mt-4 text-center font-medium bg-red-50 p-2 rounded">{error}</p>}
+                        {successMsg && <p role="status" className="text-green-600 mt-4 text-center font-medium bg-green-50 p-2 rounded">{successMsg}</p>}
                     </div>
                 </div>
             </div>
