@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import api from '../utils/axios';
 import { Link, useNavigate } from 'react-router-dom';
-import { formatDateTime } from '../utils/format';
+import { formatDateTime, hasStarted } from '../utils/format';
 import useRefreshOnFocus from '../utils/useRefreshOnFocus';
 import { FaTicketAlt, FaTimesCircle } from 'react-icons/fa';
 
@@ -91,6 +91,8 @@ const UserDashboard = () => {
                         const event = booking.eventId || booking.eventSnapshot;
                         const eventDeleted = !booking.eventId;
                         const isActive = booking.status === 'pending' || booking.status === 'confirmed';
+                        // Once the event has started a booking can no longer be cancelled or re-requested.
+                        const started = !eventDeleted && hasStarted(booking.eventId.date);
 
                         return (
                             <div key={booking._id} className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-md transition border border-gray-100 flex flex-col">
@@ -130,7 +132,12 @@ const UserDashboard = () => {
                                     )}
                                 </div>
                                 <div className="p-4 bg-gray-50 flex justify-between items-center shrink-0">
-                                    {!eventDeleted && isActive ? (
+                                    {!eventDeleted && isActive && started ? (
+                                        <>
+                                            <Link to={`/events/${booking.eventId._id}`} className="text-gray-900 font-semibold text-sm hover:underline">View Event</Link>
+                                            <span className="text-sm text-gray-500 italic">{booking.status === 'confirmed' ? 'Event has started' : 'Not approved before the event'}</span>
+                                        </>
+                                    ) : !eventDeleted && isActive ? (
                                         <>
                                             <Link to={`/events/${booking.eventId._id}`} className="text-gray-900 font-semibold text-sm hover:underline">View Event</Link>
                                             <button
@@ -140,7 +147,7 @@ const UserDashboard = () => {
                                                 <FaTimesCircle /> Cancel
                                             </button>
                                         </>
-                                    ) : booking.status === 'rejected' && !eventDeleted ? (
+                                    ) : booking.status === 'rejected' && !eventDeleted && !started ? (
                                         <>
                                             <span className="text-sm text-gray-500 italic">Request declined</span>
                                             <Link to={`/events/${booking.eventId._id}`} className="text-gray-900 font-semibold text-sm hover:underline">Request again</Link>

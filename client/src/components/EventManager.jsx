@@ -485,7 +485,15 @@ const EventManager = ({ mode }) => {
                                             )}
 
                                             {/* Approve / reject actions */}
-                                            {booking.status === 'pending' && (
+                                            {booking.status === 'pending' && liveEvent && hasStarted(liveEvent.date) && (
+                                                <div className="flex flex-wrap items-center gap-2 mt-2">
+                                                    <p className="flex-1 text-xs text-gray-500 italic">The event has started, so this request can only be declined.</p>
+                                                    <button onClick={() => handleRejectBooking(booking)} className="w-[80px] bg-red-50 text-red-600 hover:bg-red-500 hover:text-white border border-red-200 text-xs font-bold py-2.5 px-3 rounded-lg transition">
+                                                        ✕ Reject
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {booking.status === 'pending' && !(liveEvent && hasStarted(liveEvent.date)) && (
                                                 <div className="flex flex-wrap gap-2 mt-2">
                                                     <button onClick={() => handleConfirmBooking(booking, 'paid')} className="flex-1 min-w-[120px] bg-green-50 text-green-700 hover:bg-green-600 hover:text-white border border-green-200 text-xs font-bold py-2.5 px-3 rounded-lg shadow-sm transition">
                                                         ✓ Approve as Paid

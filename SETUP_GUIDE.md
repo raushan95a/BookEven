@@ -148,7 +148,7 @@ Use a normal window for one account and a private/incognito window for another, 
 npm test --prefix server
 ```
 
-About 25 seconds, 107 tests. They run on a temporary in-memory database: they **never** touch the database in `.env` and never send email. A `MongoNetworkError: read ECONNRESET` line near the end is harmless shutdown noise; check the final `pass` / `fail` counts.
+About 25 seconds, 119 tests. They run on a temporary in-memory database: they **never** touch the database in `.env` and never send email. A `MongoNetworkError: read ECONNRESET` line near the end is harmless shutdown noise; check the final `pass` / `fail` counts.
 
 Client build check: `npm run build`.
 

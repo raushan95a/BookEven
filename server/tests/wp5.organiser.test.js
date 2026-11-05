@@ -286,3 +286,156 @@ describe('organiser access is limited to their own events', () => {
         assert.equal((await t.api('GET', '/events/mine')).status, 401);
     });
 });
+
+describe('organisers cannot book their own events', () => {
+    let organiser; let other; let admin;
+    before(async () => {
+        organiser = await t.makeUser({ name: 'Own Event Organiser' });
+        other = await t.makeUser();
+        admin = await t.makeAdmin();
+    });
+
+    test('booking your own event is refused (manual and auto); no seat taken, no booking stored', async () => {
+        for (const approvalMode of ['manual', 'auto']) {
+            const event = await t.makeEvent({ createdBy: organiser._id, status: 'published', approvalMode });
+            const r = await book(organiser, event._id);
+            assert.equal(r.status, 403, JSON.stringify(r.data));
+            assert.match(r.data.message, /your own event/);
+            assert.equal(await t.models.Booking.countDocuments({ eventId: event._id }), 0);
+            assert.equal((await t.models.Event.findById(event._id)).availableSeats, 10);
+        }
+    });
+
+    test('send-otp with eventId refuses your own event and sends no email', async () => {
+        const event = await t.makeEvent({ createdBy: organiser._id, status: 'published' });
+        await t.models.OTP.deleteMany({});
+        const before = t.emails.length;
+        const r = await t.api('POST', '/bookings/send-otp', { token: t.tokenFor(organiser), body: { eventId: String(event._id) } });
+        assert.equal(r.status, 403);
+        assert.equal(emailsSince(before).length, 0);
+    });
+
+    test('send-otp with eventId refuses unpublished events and bad ids', async () => {
+        const hidden = await t.makeEvent({ createdBy: organiser._id, status: 'pending_review' });
+        const token = t.tokenFor(other);
+        assert.equal((await t.api('POST', '/bookings/send-otp', { token, body: { eventId: String(hidden._id) } })).status, 404);
+        assert.equal((await t.api('POST', '/bookings/send-otp', { token, body: { eventId: 'nope' } })).status, 400);
+    });
+
+    test('an admin cannot book an event they created, but other users can', async () => {
+        const r = await t.api('POST', '/events', { token: t.tokenFor(admin), body: body({ approvalMode: 'auto' }) });
+        assert.equal(r.status, 201);
+        assert.equal((await book(admin, r.data._id)).status, 403);
+        const ok = await book(other, r.data._id);
+        assert.equal(ok.status, 201, JSON.stringify(ok.data));
+        assert.equal(ok.data.autoConfirmed, true);
+    });
+
+    test('send-otp with eventId works for someone else\'s published event', async () => {
+        const event = await t.makeEvent({ createdBy: organiser._id, status: 'published' });
+        await t.models.OTP.deleteMany({});
+        const r = await t.api('POST', '/bookings/send-otp', { token: t.tokenFor(other), body: { eventId: String(event._id) } });
+        assert.equal(r.status, 200, JSON.stringify(r.data));
+    });
+});
+
+describe('rules once an event has started', () => {
+    let organiser; let attendee; let admin;
+    const pastDate = () => new Date(Date.now() - 60 * 60 * 1000);
+    before(async () => {
+        organiser = await t.makeUser({ name: 'Past Organiser' });
+        attendee = await t.makeUser();
+        admin = await t.makeAdmin();
+    });
+
+    test('a pending request cannot be approved after the event starts, but can be declined', async () => {
+        const event = await t.makeEvent({ createdBy: organiser._id, date: pastDate() });
+        const pending = await t.makeBooking(attendee, event);
+        let r = await t.api('PUT', `/bookings/${pending.id}/confirm`, { token: t.tokenFor(organiser), body: { paymentStatus: 'paid' } });
+        assert.equal(r.status, 400);
+        assert.match(r.data.message, /already started/);
+        assert.equal((await t.models.Event.findById(event._id)).availableSeats, 10, 'no seat taken');
+        r = await t.api('PUT', `/bookings/${pending.id}/reject`, { token: t.tokenFor(admin), body: { reason: 'Too late' } });
+        assert.equal(r.status, 200);
+    });
+
+    test('an attendee cannot cancel after the event starts; the organiser and admin still can', async () => {
+        const event = await t.makeEvent({ createdBy: organiser._id, date: pastDate(), availableSeats: 8 });
+        const a = await t.makeBooking(attendee, event, { status: 'confirmed', paymentStatus: 'paid' });
+        let r = await t.api('DELETE', `/bookings/${a.id}`, { token: t.tokenFor(attendee) });
+        assert.equal(r.status, 400);
+        assert.equal((await t.models.Booking.findById(a.id)).status, 'confirmed');
+        r = await t.api('DELETE', `/bookings/${a.id}`, { token: t.tokenFor(organiser) });
+        assert.equal(r.status, 200);
+        const b = await t.makeBooking(await t.makeUser(), event, { status: 'confirmed' });
+        r = await t.api('DELETE', `/bookings/${b.id}`, { token: t.tokenFor(admin) });
+        assert.equal(r.status, 200);
+    });
+
+    test('an attendee can still cancel before the event starts', async () => {
+        const event = await t.makeEvent({ createdBy: organiser._id, availableSeats: 9 });
+        const b = await t.makeBooking(attendee, event, { status: 'confirmed' });
+        const r = await t.api('DELETE', `/bookings/${b.id}`, { token: t.tokenFor(attendee) });
+        assert.equal(r.status, 200);
+        assert.equal((await t.models.Event.findById(event._id)).availableSeats, 10);
+    });
+
+    test('a past event with active bookings cannot be deleted; nothing changes and no emails go out', async () => {
+        const event = await t.makeEvent({ createdBy: organiser._id, date: pastDate(), availableSeats: 9 });
+        const b = await t.makeBooking(attendee, event, { status: 'confirmed', paymentStatus: 'paid' });
+        const before = t.emails.length;
+        for (const user of [organiser, admin]) {
+            const r = await t.api('DELETE', `/events/${event.id}`, { token: t.tokenFor(user) });
+            assert.equal(r.status, 400);
+            assert.match(r.data.message, /kept as a record/);
+        }
+        assert.ok(await t.models.Event.findById(event._id));
+        assert.equal((await t.models.Booking.findById(b.id)).status, 'confirmed');
+        assert.equal(emailsSince(before).filter((e) => e.type === 'event_cancelled').length, 0);
+    });
+
+    test('a past event with no active bookings can still be deleted', async () => {
+        const event = await t.makeEvent({ createdBy: organiser._id, date: pastDate() });
+        await t.makeBooking(attendee, event, { status: 'cancelled' });
+        const r = await t.api('DELETE', `/events/${event.id}`, { token: t.tokenFor(organiser) });
+        assert.equal(r.status, 200);
+    });
+});
+
+describe('admin edits and waiting organiser changes', () => {
+    test('an admin edit replaces the waiting proposal for that field; other proposed fields stay', async () => {
+        const organiser = await t.makeUser();
+        const admin = await t.makeAdmin();
+        const event = await t.makeEvent({ createdBy: organiser._id, status: 'published', title: 'Original' });
+        let r = await t.api('PUT', `/events/${event.id}`, { token: t.tokenFor(organiser), body: { title: 'Organiser title', location: 'New hall' } });
+        assert.deepEqual(r.data.changesAwaitingReview.sort(), ['location', 'title']);
+        const oldVersion = (await t.models.Event.findById(event._id)).pendingChanges.submittedAt.toISOString();
+
+        r = await t.api('PUT', `/events/${event.id}`, { token: t.tokenFor(admin), body: { title: 'Admin title' } });
+        assert.equal(r.status, 200);
+        assert.equal(r.data.title, 'Admin title');
+        let saved = await t.models.Event.findById(event._id);
+        assert.equal(saved.pendingChanges.title, undefined, 'title proposal dropped');
+        assert.equal(saved.pendingChanges.location, 'New hall', 'location proposal kept');
+
+        // A review of the old version is refused, so the admin re-checks before approving.
+        r = await t.api('PUT', `/events/${event.id}/review`, { token: t.tokenFor(admin), body: { decision: 'approve', version: oldVersion } });
+        assert.equal(r.status, 409);
+        r = await t.api('PUT', `/events/${event.id}/review`, { token: t.tokenFor(admin), body: { decision: 'approve' } });
+        assert.equal(r.status, 200);
+        saved = await t.models.Event.findById(event._id);
+        assert.equal(saved.title, 'Admin title', 'approval did not undo the admin edit');
+        assert.equal(saved.location, 'New hall');
+    });
+
+    test('when the admin edit covers every proposed field, nothing is left to review', async () => {
+        const organiser = await t.makeUser();
+        const admin = await t.makeAdmin();
+        const event = await t.makeEvent({ createdBy: organiser._id, status: 'published' });
+        await t.api('PUT', `/events/${event.id}`, { token: t.tokenFor(organiser), body: { location: 'Somewhere' } });
+        await t.api('PUT', `/events/${event.id}`, { token: t.tokenFor(admin), body: { location: 'Admin place' } });
+        const saved = await t.models.Event.findById(event._id);
+        assert.equal(saved.pendingChanges, undefined);
+        assert.equal(saved.location, 'Admin place');
+    });
+});

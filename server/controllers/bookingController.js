@@ -14,6 +14,13 @@ const MAX_PAGE_SIZE = 100;
 
 exports.sendBookingOTP = async (req, res, next) => {
     try {
+        // With an eventId, refuse up front (no email) when the event cannot be booked by
+        // this user, e.g. it is unpublished or it is their own event. Optional for older clients;
+        // the booking itself always runs the same check.
+        if (req.body?.eventId !== undefined) {
+            const eventId = requireObjectId(req.body.eventId, 'event id');
+            bookingService.assertBookable(await Event.findById(eventId), req.user);
+        }
         const delivery = await deliverOTP(req.user.email, 'event_booking');
         if (delivery.status === 'failed') return res.status(503).json({ message: EMAIL_FAILED_MESSAGE });
         if (delivery.status === 'cooldown') {
@@ -32,7 +39,7 @@ exports.bookEvent = async (req, res, next) => {
         const otp = requireOtp(req.body.otp);
 
         // Check the event before using up the OTP, so a failed check doesn't cost the user their code.
-        bookingService.assertBookable(await Event.findById(eventId));
+        bookingService.assertBookable(await Event.findById(eventId), req.user);
 
         // Look for any active booking, not just the first booking found, which might be a cancelled one.
         const existingBooking = await Booking.exists({

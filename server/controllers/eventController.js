@@ -218,6 +218,24 @@ exports.updateEvent = async (req, res, next) => {
         if (!event) return res.status(404).json({ message: 'Event not found' });
         if (!canManageEvent(req.user, event)) throw new HttpError(403, 'Not authorized to edit this event');
 
+        if (isAdmin(req.user) && event.pendingChanges) {
+            // An admin's direct edit replaces the organiser's waiting proposal for the same
+            // fields; otherwise approving that proposal later would undo the admin's edit.
+            const { submittedAt: _submittedAt, ...waiting } = event.pendingChanges.toObject();
+            const superseded = Object.keys(updates).filter((field) => field in waiting);
+            if (superseded.length) {
+                for (const field of superseded) delete waiting[field];
+                const remaining = Object.keys(waiting).length > 0;
+                // A changed proposal gets a new timestamp, so a review of the old version is refused.
+                return res.json(await applyEventUpdate(
+                    event,
+                    updates,
+                    remaining ? { pendingChanges: { ...waiting, submittedAt: new Date() } } : {},
+                    remaining ? [] : ['pendingChanges']
+                ));
+            }
+        }
+
         if (isAdmin(req.user) || event.status === 'pending_review') {
             return res.json(await applyEventUpdate(event, updates));
         }

@@ -72,7 +72,7 @@ const EventDetail = () => {
 
         try {
             if (!showOTP) {
-                const { data } = await api.post('/bookings/send-otp');
+                const { data } = await api.post('/bookings/send-otp', { eventId: event._id });
                 setShowOTP(true);
                 setSuccessMsg(data.retryAfterSeconds
                     ? 'A code was sent to your email less than a minute ago. Enter it below.'
@@ -107,6 +107,8 @@ const EventDetail = () => {
     // Only the organiser and admins can open an unpublished event; it cannot be booked yet.
     const isUnpublished = event.status === 'pending_review' || event.status === 'rejected';
     const isClosed = hasStarted(event.date) || isUnpublished;
+    // Organisers cannot book their own event (the server refuses it too).
+    const isOwnEvent = Boolean(user && event.createdBy && String(event.createdBy._id || event.createdBy) === String(user._id));
     const buttonDisabled = isSoldOut || isClosed || bookingLoading || (showOTP && !otp);
 
     let buttonLabel = 'Confirm Registration';
@@ -202,7 +204,13 @@ const EventDetail = () => {
                             </div>
                         </div>
 
-                        {myBooking ? (
+                        {isOwnEvent && !myBooking ? (
+                            <div role="status" className="p-4 rounded-xl border text-center bg-blue-50 border-blue-200 text-blue-800">
+                                <p className="font-bold text-lg mb-1">This is your event</p>
+                                <p className="text-sm mb-3">Organisers cannot book seats at their own events. Manage its bookings from My Events.</p>
+                                <Link to={user.role === 'admin' ? '/admin' : '/organiser'} className="text-sm font-semibold underline">Go to my events</Link>
+                            </div>
+                        ) : myBooking ? (
                             // Already requested or booked: show the status instead of the button.
                             <div role="status" className={`p-4 rounded-xl border text-center ${myBooking.status === 'confirmed' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}>
                                 <p className="font-bold text-lg mb-1">
@@ -240,7 +248,7 @@ const EventDetail = () => {
                                         />
                                         <div className="text-center mt-2">
                                             <ResendCodeButton
-                                                onResend={async () => (await api.post('/bookings/send-otp')).data}
+                                                onResend={async () => (await api.post('/bookings/send-otp', { eventId: event._id })).data}
                                                 onMessage={(text, isError) => {
                                                     if (isError) { setError(text); setSuccessMsg(''); } else { setSuccessMsg(text); setError(''); }
                                                 }}

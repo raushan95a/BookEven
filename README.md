@@ -13,11 +13,13 @@ BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. 
   - A user's new event is *Waiting for approval*: hidden from the public and not bookable. Admins are emailed and review it under *Event Submissions*; the organiser is emailed the result (with the reason if rejected). Editing a rejected event sends it back for review.
   - On a published event, changes to the title, description, date, location or price wait for admin approval while the event stays live and bookable as it is. Seats, image, category and booking approval change immediately.
   - Events created by an admin are published straight away.
+  - When an admin edits a field that an organiser's waiting proposal also changes, the admin's value wins and that field is dropped from the proposal, so approving the rest later does not undo the admin's edit.
 - **Booking rules**:
   - Each event has a **booking approval** setting: *Admin approves each request* (default) or *Auto-approve*, where a request is confirmed and takes a seat immediately. Free auto-approved bookings count as paid; paid ones are marked paid by the admin later.
   - On approval-required events a seat is taken only when an admin approves. Neither mode can overbook, even when many people book at once.
   - One pending/confirmed booking per user per event (enforced by the database).
-  - Booking closes when the event starts.
+  - Organisers (admins included) cannot book seats at their own events.
+  - Booking closes when the event starts. After that, a still-pending request can only be declined (not approved), attendees can no longer cancel (the organiser or an admin still can, to correct records), and an event that still has active bookings cannot be deleted (it is kept as a record; a past event with no active bookings can be).
   - Approve, cancel, decline and event deletion each run in a MongoDB transaction: all of it happens or none of it does.
   - Deleting an event cancels its active bookings, keeps them as history and emails the users.
 - **Emails** (Nodemailer + Gmail): verification codes, booking confirmed, request declined, event cancelled. If an email cannot be sent, the API says so instead of failing silently.
@@ -137,7 +139,7 @@ Base URL: `http://localhost:5000/api`. Authenticated requests send `Authorizatio
 | DELETE | `/events/:id` | Admin / Organiser | Delete event, cancel its active bookings, email users |
 | GET | `/events/review` | Admin | Events waiting for review and events with proposed changes |
 | PUT | `/events/:id/review` | Admin | `{ decision: "approve" \| "reject", reason? }` for a new event or its proposed changes; emails the organiser |
-| POST | `/bookings/send-otp` | User | Email a booking code |
+| POST | `/bookings/send-otp` | User | Email a booking code. Optional `{ eventId }`: refuses up front (no email) if that event cannot be booked by the caller, e.g. unpublished, started, full or their own |
 | POST | `/bookings` | User | Request a seat: `{ eventId, otp }`. Pending, or confirmed at once (`autoConfirmed: true`) on auto-approve events |
 | GET | `/bookings/my` | User | The caller's own bookings |
 | DELETE | `/bookings/:id` | Owner / Organiser / Admin | Cancel; a confirmed seat is returned |

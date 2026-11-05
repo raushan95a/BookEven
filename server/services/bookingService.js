@@ -19,10 +19,12 @@ const hasEventStarted = (event) => event.date.getTime() <= Date.now();
 /**
  * The single set of rules for whether an event can be booked right now. Used for the
  * quick check before a booking code is spent, and again inside the booking transaction.
+ * Pass the user who wants to book: an event's own organiser cannot book a seat at it.
  */
-const assertBookable = (event) => {
+const assertBookable = (event, user) => {
     // Events waiting for review (or rejected) cannot be booked.
     if (!event || !event.isPublished()) throw new HttpError(404, 'Event not found');
+    if (user && ownsEvent(user, event)) throw new HttpError(403, 'You cannot book a seat at your own event');
     if (hasEventStarted(event)) throw new HttpError(400, 'This event has already started');
     if (event.availableSeats <= 0) throw new HttpError(400, 'No seats available');
 };
@@ -40,7 +42,7 @@ const PUBLIC_EVENT_FIELDS = '-pendingChanges -reviewNote -reviewedBy -reviewedAt
 const createBooking = async ({ user, eventId }) => {
     const bookingId = await withTransaction(async (session) => {
         const event = await Event.findById(eventId).session(session);
-        assertBookable(event);
+        assertBookable(event, user);
 
         const auto = event.approvalMode === 'auto';
         if (auto) {
@@ -113,6 +115,13 @@ const confirmBooking = async ({ bookingId, paymentStatus, actorId }) => {
         if (booking.status === 'confirmed') throw new HttpError(400, 'Booking is already confirmed');
         if (booking.status !== 'pending') throw new HttpError(400, 'Only pending bookings can be confirmed');
 
+        // A request still waiting when the event starts can only be declined: approving it
+        // would take a seat at an event that is already under way or over.
+        const current = await Event.findById(booking.eventId).select('date').session(session);
+        if (current && hasEventStarted(current)) {
+            throw new HttpError(400, 'This event has already started. The request can only be declined.');
+        }
+
         // The "seats left?" check and the decrement are one operation.
         const event = await Event.findOneAndUpdate(
             { _id: booking.eventId, availableSeats: mongoose.trusted({ $gt: 0 }) },
@@ -153,11 +162,16 @@ const cancelBooking = async ({ bookingId, actor }) => {
     return withTransaction(async (session) => {
         const booking = await Booking.findById(bookingId).session(session);
         if (!booking) throw new HttpError(404, 'Booking not found');
-        if (booking.userId.toString() !== actor.id && !isAdmin(actor)) {
-            const event = await Event.findById(booking.eventId).select('createdBy').session(session);
-            if (!ownsEvent(actor, event)) throw new HttpError(403, 'Not authorized');
-        }
+        const event = await Event.findById(booking.eventId).select('createdBy date').session(session);
+        const isOwner = booking.userId.toString() === actor.id;
+        const canManage = isAdmin(actor) || ownsEvent(actor, event);
+        if (!isOwner && !canManage) throw new HttpError(403, 'Not authorized');
         if (!ACTIVE_STATUSES.includes(booking.status)) throw new HttpError(400, 'Already cancelled');
+        // Once the event has started an attendee's booking is a record of attendance and
+        // payment; only the organiser or an admin can still correct it.
+        if (!canManage && event && hasEventStarted(event)) {
+            throw new HttpError(400, 'This event has already started, so the booking can no longer be cancelled');
+        }
 
         const previous = await Booking.findOneAndUpdate(
             { _id: bookingId, status: mongoose.trusted({ $in: ACTIVE_STATUSES }) },
@@ -223,6 +237,13 @@ const deleteEventWithBookings = async ({ eventId, actorId }) => {
         const active = await Booking.find({ eventId, status: mongoose.trusted({ $in: ACTIVE_STATUSES }) })
             .populate('userId', 'name email')
             .session(session);
+
+        // Deleting an event that already took place would mark its attendees' bookings as
+        // cancelled (removing them from revenue) and email them about a cancellation.
+        // Past events with no active bookings can still be removed.
+        if (active.length && hasEventStarted(event)) {
+            throw new HttpError(400, 'This event has already taken place and has bookings, so it is kept as a record and cannot be deleted');
+        }
 
         if (active.length) {
             await Booking.updateMany(
