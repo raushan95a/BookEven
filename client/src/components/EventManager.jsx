@@ -4,6 +4,7 @@ import api from '../utils/axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { formatDateTime, toDateTimeLocalValue, fromDateTimeLocalValue, hasStarted } from '../utils/format';
 import EventSubmissions from './EventSubmissions';
+import useRefreshOnFocus from '../utils/useRefreshOnFocus';
 
 const PAGE_SIZE = 20;
 const EMPTY_FORM = { title: '', description: '', date: '', location: '', category: '', totalSeats: '', ticketPrice: '', image: '', approvalMode: 'manual' };
@@ -73,7 +74,7 @@ const EventManager = ({ mode }) => {
     const navigate = useNavigate();
     const [events, setEvents] = useState([]);
     const [bookings, setBookings] = useState([]);
-    const [pageInfo, setPageInfo] = useState({ page: 1, totalPages: 1, total: 0 });
+    const [pageInfo, setPageInfo] = useState({ loadedMore: false, hasMore: false, total: 0 });
     const [filters, setFilters] = useState({ status: '', eventId: '' });
     const [stats, setStats] = useState({ totalRevenue: 0, paidClients: 0, pendingRequests: 0 });
     const [loading, setLoading] = useState(true);
@@ -97,14 +98,20 @@ const EventManager = ({ mode }) => {
         setStats(data);
     }, []);
 
-    const fetchBookings = useCallback(async (page, append) => {
+    // offset = how many matching bookings are already shown (0 for a fresh list).
+    const fetchBookings = useCallback(async (offset, append) => {
         setListLoading(true);
         try {
             const { data } = await api.get('/bookings', {
-                params: { page, limit: PAGE_SIZE, status: filters.status || undefined, eventId: filters.eventId || undefined }
+                params: { offset, limit: PAGE_SIZE, status: filters.status || undefined, eventId: filters.eventId || undefined }
             });
-            setBookings((current) => (append ? [...current, ...data.items] : data.items));
-            setPageInfo({ page: data.page, totalPages: data.totalPages, total: data.total });
+            setBookings((current) => {
+                if (!append) return data.items;
+                // New bookings arriving meanwhile can shift results; never show one twice.
+                const seen = new Set(current.map((b) => b._id));
+                return [...current, ...data.items.filter((b) => !seen.has(b._id))];
+            });
+            setPageInfo({ loadedMore: append || offset > 0, hasMore: data.hasMore, total: data.total });
         } finally {
             setListLoading(false);
         }
@@ -125,12 +132,19 @@ const EventManager = ({ mode }) => {
     // Reload the first page whenever a filter changes.
     useEffect(() => {
         if (!allowed) return;
-        fetchBookings(1, false).catch((error) =>
+        fetchBookings(0, false).catch((error) =>
             setNotice({ type: 'error', text: error.response?.data?.message || 'Error loading bookings' }));
     }, [allowed, fetchBookings]);
 
     // Seat counts and stats change after every booking action.
     const refreshCounts = () => Promise.all([fetchEvents(), fetchStats()]).catch(() => {});
+
+    // Coming back to the tab shows new requests, seat counts and stats. The booking list
+    // is reloaded only while on its first page, so "Load more" results are not lost.
+    useRefreshOnFocus(() => {
+        if (!allowed) return undefined;
+        return Promise.all([refreshCounts(), pageInfo.loadedMore ? null : fetchBookings(0, false)]);
+    });
 
     const replaceBooking = (updated) => {
         setBookings((current) => current.map((b) => (b._id === updated._id ? updated : b)));
@@ -208,7 +222,7 @@ const EventManager = ({ mode }) => {
                 setFilters((f) => ({ ...f, eventId: '' }));
                 await refreshCounts();
             } else {
-                await Promise.all([refreshCounts(), fetchBookings(1, false)]);
+                await Promise.all([refreshCounts(), fetchBookings(0, false)]);
             }
         } catch (error) {
             alert(error.response?.data?.message || 'Error deleting event');
@@ -489,9 +503,11 @@ const EventManager = ({ mode }) => {
                                 })
                             }
                         </ul>
-                        {pageInfo.page < pageInfo.totalPages && (
+                        {pageInfo.hasMore && (
                             <button
-                                onClick={() => fetchBookings(pageInfo.page + 1, true)}
+                                // Skip only bookings that still match the filter: ones approved or
+                                // rejected while viewing e.g. "Pending" have left the server's list.
+                                onClick={() => fetchBookings(bookings.filter((b) => !filters.status || b.status === filters.status).length, true)}
                                 disabled={listLoading}
                                 className="w-full py-3 text-sm font-bold text-gray-700 hover:bg-gray-50 border-t border-gray-100 transition"
                             >

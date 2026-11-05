@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../utils/axios';
 import { AuthContext } from '../context/AuthContext';
 import { formatDateTimeLong, hasStarted } from '../utils/format';
 import ResendCodeButton from '../components/ResendCodeButton';
+import useRefreshOnFocus from '../utils/useRefreshOnFocus';
 import { FaCalendarAlt, FaMapMarkerAlt, FaChair, FaMoneyBillWave } from 'react-icons/fa';
 
 const ACTIVE_STATUSES = ['pending', 'confirmed'];
@@ -24,34 +25,41 @@ const EventDetail = () => {
     // Their most recent declined request, shown as a note.
     const [declined, setDeclined] = useState(null);
 
-    useEffect(() => {
-        const fetchEvent = async () => {
-            try {
-                const { data } = await api.get(`/events/${id}`);
-                setEvent(data);
-            } catch (err) {
-                setError('Failed to load event details.');
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchEvent();
+    // quiet: a background refresh of an already-shown event never replaces it with an error.
+    const fetchEvent = useCallback(async ({ quiet = false } = {}) => {
+        try {
+            const { data } = await api.get(`/events/${id}`);
+            setEvent(data);
+        } catch (err) {
+            if (!quiet) setError('Failed to load event details.');
+        } finally {
+            setLoading(false);
+        }
     }, [id]);
 
-    useEffect(() => {
-        if (!user) return;
-        const fetchMyBooking = async () => {
-            try {
-                const { data } = await api.get('/bookings/my');
-                const forThisEvent = data.filter((b) => (b.eventId?._id || b.eventId) === id);
-                setMyBooking(forThisEvent.find((b) => ACTIVE_STATUSES.includes(b.status)) || null);
-                setDeclined(forThisEvent.find((b) => b.status === 'rejected') || null);
-            } catch {
-                // Not critical: the server still blocks duplicate bookings.
-            }
-        };
-        fetchMyBooking();
+    const fetchMyBooking = useCallback(async () => {
+        if (!user) {
+            // Signed out: forget the previous user's booking status.
+            setMyBooking(null);
+            setDeclined(null);
+            return;
+        }
+        try {
+            const { data } = await api.get('/bookings/my');
+            const forThisEvent = data.filter((b) => (b.eventId?._id || b.eventId) === id);
+            setMyBooking(forThisEvent.find((b) => ACTIVE_STATUSES.includes(b.status)) || null);
+            setDeclined(forThisEvent.find((b) => b.status === 'rejected') || null);
+        } catch {
+            // Not critical: the server still blocks duplicate bookings.
+        }
     }, [user, id]);
+
+    useEffect(() => { fetchEvent(); }, [fetchEvent]);
+    useEffect(() => { fetchMyBooking(); }, [fetchMyBooking]);
+
+    // Coming back to this tab (e.g. after an organiser approved the request elsewhere)
+    // shows the current seat count and booking status without a manual reload.
+    useRefreshOnFocus(() => Promise.all([fetchEvent({ quiet: true }), fetchMyBooking()]));
 
     const handleBooking = async () => {
         if (!user) {
@@ -77,9 +85,9 @@ const EventDetail = () => {
                 setOtp('');
                 if (data.autoConfirmed) {
                     // Auto-approve events take the seat now: show the new count from the server.
-                    const fresh = await api.get(`/events/${event._id}`);
-                    setEvent(fresh.data);
                     setSuccessMsg('Booking confirmed! A confirmation email is on its way.');
+                    // Refresh the seat count; the booking already succeeded, so a failure here is ignored.
+                    fetchEvent({ quiet: true });
                 } else {
                     // Seats are only taken when the organiser approves, so the count shown stays as it is.
                     setSuccessMsg('Booking requested! Awaiting admin confirmation.');

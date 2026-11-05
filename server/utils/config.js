@@ -47,4 +47,14 @@ const loadConfig = (env = process.env) => {
     };
 };
 
-module.exports = { loadConfig, KNOWN_PUBLIC_SECRETS, MIN_SECRET_LENGTH };
+// The "one active booking per user per event" index uses $in in a partial filter,
+// which MongoDB supports from 6.0. On older servers that index cannot be built.
+const MIN_MONGO_MAJOR = 6;
+const assertSupportedMongoVersion = (version) => {
+    const major = Number.parseInt(String(version), 10);
+    if (!Number.isFinite(major) || major < MIN_MONGO_MAJOR) {
+        throw new Error(`MongoDB ${version} is not supported: version ${MIN_MONGO_MAJOR}.0 or newer is required (MongoDB Atlas qualifies).`);
+    }
+};
+
+module.exports = { loadConfig, assertSupportedMongoVersion, KNOWN_PUBLIC_SECRETS, MIN_SECRET_LENGTH };

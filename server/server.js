@@ -7,7 +7,7 @@ const path = require('path');
 dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const { loadConfig } = require('./utils/config');
+const { loadConfig, assertSupportedMongoVersion } = require('./utils/config');
 
 let config;
 try {
@@ -30,6 +30,9 @@ const start = async () => {
     if (!(await supportsTransactions())) {
         throw new Error('This MongoDB deployment does not support transactions. Use MongoDB Atlas or a replica set.');
     }
+
+    const { version } = await mongoose.connection.db.admin().command({ buildInfo: 1 });
+    assertSupportedMongoVersion(version);
 
     if (!require('./utils/email').isEmailConfigured()) {
         console.warn('Warning: EMAIL_USER / EMAIL_PASS are not set. Verification codes and notifications cannot be emailed.');

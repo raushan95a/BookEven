@@ -12,9 +12,6 @@ const ALL_STATUSES = Booking.schema.path('status').enumValues;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
-// Booking closes when the event starts.
-const hasEventStarted = (event) => event.date.getTime() <= Date.now();
-
 exports.sendBookingOTP = async (req, res, next) => {
     try {
         const delivery = await deliverOTP(req.user.email, 'event_booking');
@@ -35,11 +32,7 @@ exports.bookEvent = async (req, res, next) => {
         const otp = requireOtp(req.body.otp);
 
         // Check the event before using up the OTP, so a failed check doesn't cost the user their code.
-        const event = await Event.findById(eventId);
-        // Events waiting for review (or rejected) cannot be booked.
-        if (!event || !event.isPublished()) throw new HttpError(404, 'Event not found');
-        if (hasEventStarted(event)) throw new HttpError(400, 'This event has already started');
-        if (event.availableSeats <= 0) throw new HttpError(400, 'No seats available');
+        bookingService.assertBookable(await Event.findById(eventId));
 
         // Look for any active booking, not just the first booking found, which might be a cancelled one.
         const existingBooking = await Booking.exists({
@@ -147,7 +140,10 @@ exports.rejectBooking = async (req, res, next) => {
 // Admins list all bookings with GET /api/bookings.
 exports.getMyBookings = async (req, res, next) => {
     try {
-        const bookings = await Booking.find({ userId: req.user._id }).populate('eventId').sort({ createdAt: -1 });
+        // Attendees never see an event's unapproved changes or admin notes.
+        const bookings = await Booking.find({ userId: req.user._id })
+            .populate('eventId', bookingService.PUBLIC_EVENT_FIELDS)
+            .sort({ createdAt: -1 });
         res.json(bookings);
     } catch (error) {
         next(error);
@@ -172,22 +168,33 @@ const adminFilter = (query) => {
 exports.listBookings = async (req, res, next) => {
     try {
         const filter = await scopeToManagedEvents(req.user, adminFilter(req.query));
-        const page = req.query.page === undefined ? 1 : requireNumber(req.query.page, 'page', { min: 1, max: 100000, integer: true });
         const limit = req.query.limit === undefined
             ? DEFAULT_PAGE_SIZE
             : requireNumber(req.query.limit, 'limit', { min: 1, max: MAX_PAGE_SIZE, integer: true });
+        // ?offset= (how many to skip) takes priority over ?page=. "Load more" uses it so that
+        // bookings which left a filtered list (e.g. approved while viewing "pending") are
+        // not counted, and nothing gets skipped.
+        let skip;
+        let page;
+        if (req.query.offset !== undefined) {
+            skip = requireNumber(req.query.offset, 'offset', { min: 0, max: 10000000, integer: true });
+            page = Math.floor(skip / limit) + 1;
+        } else {
+            page = req.query.page === undefined ? 1 : requireNumber(req.query.page, 'page', { min: 1, max: 100000, integer: true });
+            skip = (page - 1) * limit;
+        }
 
         const [items, total] = await Promise.all([
             Booking.find(filter)
                 .sort({ createdAt: -1, _id: -1 })
-                .skip((page - 1) * limit)
+                .skip(skip)
                 .limit(limit)
                 .populate('eventId')
                 .populate('userId', 'name email'),
             Booking.countDocuments(filter)
         ]);
 
-        res.json({ items, page, limit, total, totalPages: Math.ceil(total / limit) });
+        res.json({ items, page, limit, offset: skip, total, totalPages: Math.ceil(total / limit), hasMore: skip + items.length < total });
     } catch (error) {
         next(error);
     }
@@ -208,7 +215,15 @@ exports.getBookingStats = async (req, res, next) => {
                     byStatus: [{ $group: { _id: '$status', count: { $sum: 1 } } }],
                     paid: [
                         { $match: { status: 'confirmed', paymentStatus: 'paid' } },
-                        { $group: { _id: null, revenue: { $sum: '$amount' }, clients: { $addToSet: '$userId' } } }
+                        {
+                            $group: {
+                                _id: null,
+                                revenue: { $sum: '$amount' },
+                                // Only people who actually paid something: free bookings are
+                                // marked 'paid' (nothing owed) but are not paying clients.
+                                clients: { $addToSet: { $cond: [{ $gt: ['$amount', 0] }, '$userId', '$$REMOVE'] } }
+                            }
+                        }
                     ]
                 }
             }

@@ -3,6 +3,7 @@ import { AuthContext } from '../context/AuthContext';
 import api from '../utils/axios';
 import { Link, useNavigate } from 'react-router-dom';
 import { formatDateTime } from '../utils/format';
+import useRefreshOnFocus from '../utils/useRefreshOnFocus';
 import { FaTicketAlt, FaTimesCircle } from 'react-icons/fa';
 
 const STATUS_STYLES = {
@@ -36,6 +37,9 @@ const UserDashboard = () => {
             setLoading(false);
         }
     };
+
+    // Show approvals and rejections made while this tab was in the background.
+    useRefreshOnFocus(() => (user ? fetchBookings() : undefined));
 
     const cancelBooking = async (id) => {
         if (window.confirm('Are you sure you want to cancel this booking request?')) {

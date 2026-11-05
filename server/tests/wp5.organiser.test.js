@@ -35,8 +35,9 @@ describe('submitting and reviewing an event', () => {
         assert.equal(r.data.status, 'pending_review');
         assert.equal(r.data.createdBy, organiser.id);
         eventId = r.data._id;
-        const mails = emailsSince(before).filter((e) => e.type === 'event_submitted');
-        assert.ok(mails.some((m) => m.to === admin.email && m.kind === 'new' && m.organiser === 'Olivia Organiser'));
+        const mail = await t.waitForEmail((m, i) => i >= before && m.type === 'event_submitted' && m.to === admin.email && m.kind === 'new');
+        assert.ok(mail, 'admin emailed (sent in the background)');
+        assert.equal(mail.organiser, 'Olivia Organiser');
     });
 
     test('hidden from the public, visible to its organiser and admins, not bookable', async () => {
@@ -95,7 +96,7 @@ describe('submitting and reviewing an event', () => {
         assert.equal(r.data.status, 'pending_review');
         assert.equal(r.data.location, 'Library, Room 4');
         assert.equal(r.data.reviewNote, undefined);
-        assert.ok(emailsSince(before).some((e) => e.type === 'event_submitted' && e.kind === 'resubmitted'));
+        assert.ok(await t.waitForEmail((e, i) => i >= before && e.type === 'event_submitted' && e.kind === 'resubmitted'));
     });
 
     test('admin approves: published, public, bookable; organiser emailed', async () => {
@@ -123,6 +124,7 @@ describe('submitting and reviewing an event', () => {
         const before = t.emails.length;
         const r = await t.api('POST', '/events', { token: t.tokenFor(admin), body: body({ title: 'Admin Event' }) });
         assert.equal(r.data.status, 'published');
+        await new Promise((resolve) => setTimeout(resolve, 300)); // background emails would have arrived
         assert.equal(emailsSince(before).filter((e) => e.type === 'event_submitted').length, 0);
     });
 });
@@ -147,7 +149,7 @@ describe('changes to a published event', () => {
         assert.equal(r.data.availableSeats, 12);
         assert.equal(r.data.approvalMode, 'auto');
         assert.deepEqual(r.data.changesAwaitingReview.sort(), ['ticketPrice', 'title']);
-        assert.ok(emailsSince(before).some((e) => e.type === 'event_submitted' && e.kind === 'changes'));
+        assert.ok(await t.waitForEmail((e, i) => i >= before && e.type === 'event_submitted' && e.kind === 'changes'));
         const pub = await t.api('GET', `/events/${event.id}`);
         assert.equal(pub.status, 200);
         assert.equal(pub.data.title, 'Live Title');

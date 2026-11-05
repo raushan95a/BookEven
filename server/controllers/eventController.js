@@ -196,7 +196,8 @@ exports.createEvent = async (req, res, next) => {
             createdBy: req.user._id,
             status: byAdmin ? 'published' : 'pending_review'
         });
-        if (!byAdmin) await notifyAdmins(req.user, event.title, 'new');
+        // Emails go out in the background so a slow mail server never delays the reply.
+        if (!byAdmin) notifyAdmins(req.user, event.title, 'new');
         res.status(201).json(event);
     } catch (error) {
         next(error);
@@ -224,7 +225,7 @@ exports.updateEvent = async (req, res, next) => {
         if (event.status === 'rejected') {
             // A rejected event that is edited goes back into the review queue.
             const updated = await applyEventUpdate(event, updates, { status: 'pending_review' }, ['reviewNote']);
-            await notifyAdmins(req.user, updated.title, 'resubmitted');
+            notifyAdmins(req.user, updated.title, 'resubmitted');
             return res.json(updated);
         }
 
@@ -242,17 +243,20 @@ exports.updateEvent = async (req, res, next) => {
 
         // Merge with any changes already waiting; newest values win.
         const { submittedAt: previousSubmission, ...waiting } = event.pendingChanges ? event.pendingChanges.toObject() : {};
-        for (const field of backToLive) delete waiting[field];
+        const withdrawn = backToLive.filter((field) => field in waiting);
+        for (const field of withdrawn) delete waiting[field];
+        const proposalChanged = Object.keys(reviewed).length > 0 || withdrawn.length > 0;
         const merged = { ...waiting, ...reviewed };
         const extraSet = {};
         const extraUnset = [];
         if (Object.keys(merged).length) {
-            extraSet.pendingChanges = { ...merged, submittedAt: Object.keys(reviewed).length ? new Date() : previousSubmission };
+            // A changed proposal gets a new timestamp, so a review of the old version is refused.
+            extraSet.pendingChanges = { ...merged, submittedAt: proposalChanged ? new Date() : previousSubmission };
         } else if (event.pendingChanges) {
             extraUnset.push('pendingChanges');
         }
         const updated = await applyEventUpdate(event, direct, extraSet, extraUnset);
-        if (Object.keys(reviewed).length) await notifyAdmins(req.user, event.title, 'changes');
+        if (Object.keys(reviewed).length) notifyAdmins(req.user, event.title, 'changes');
 
         res.json({ ...updated.toObject(), changesAwaitingReview: Object.keys(merged) });
     } catch (error) {
@@ -281,9 +285,18 @@ exports.reviewEvent = async (req, res, next) => {
         const { decision } = req.body;
         if (!REVIEW_DECISIONS.includes(decision)) throw new HttpError(400, "decision must be 'approve' or 'reject'");
         const reason = optionalString(req.body.reason, 'Reason', { max: 500 });
+        // Optional: the version the admin was looking at (updatedAt of a new event, or
+        // pendingChanges.submittedAt of proposed changes). If the organiser has changed it
+        // since, the review is refused so the admin never approves something unseen.
+        const version = optionalString(req.body.version, 'version', { max: 40 });
+        const versionMatches = (current) => version === undefined || (current && new Date(version).getTime() === current.getTime());
 
         const event = await Event.findById(eventId).populate('createdBy', 'name email');
         if (!event) return res.status(404).json({ message: 'Event not found' });
+        const reviewedVersion = event.status === 'pending_review' ? event.updatedAt : event.pendingChanges?.submittedAt;
+        if (!versionMatches(reviewedVersion)) {
+            throw new HttpError(409, 'The organiser changed this event while you were reviewing it. Please check the latest version.');
+        }
 
         const reviewStamp = { reviewedBy: req.user._id, reviewedAt: new Date() };
         let updated;
@@ -298,7 +311,7 @@ exports.reviewEvent = async (req, res, next) => {
                 ? { $set: { status: 'published', ...reviewStamp }, $unset: { reviewNote: '' } }
                 : { $set: { status: 'rejected', ...reviewStamp, ...(reason ? { reviewNote: reason } : {}) } };
             // Only if still waiting: two admins reviewing at once cannot both win.
-            updated = await Event.findOneAndUpdate({ _id: eventId, status: 'pending_review' }, update, { new: true });
+            updated = await Event.findOneAndUpdate({ _id: eventId, status: 'pending_review', updatedAt: event.updatedAt }, update, { new: true });
         } else if (event.pendingChanges) {
             kind = 'changes';
             const { submittedAt: _submittedAt, ...changes } = event.pendingChanges.toObject();

@@ -17,7 +17,7 @@ const securityHeaders = (isProduction) => (req, res, next) => {
  * Fine for a single server process. With several instances behind a load balancer,
  * each instance counts separately; move to a shared store (e.g. Redis) at that point.
  */
-const rateLimit = ({ windowMs, max, keyGenerator, message = 'Too many requests. Please try again later.' }) => {
+const rateLimit = ({ windowMs, max, keyGenerator, message = 'Too many requests. Please try again later.', countOnlyFailures = false }) => {
     const hits = new Map();
 
     const sweep = setInterval(() => {
@@ -41,6 +41,15 @@ const rateLimit = ({ windowMs, max, keyGenerator, message = 'Too many requests. 
         if (entry.count > max) {
             res.setHeader('Retry-After', Math.ceil((entry.resetAt - now) / 1000));
             return res.status(429).json({ message });
+        }
+        // countOnlyFailures: a successful request (status below 400) is not counted, so
+        // logging in correctly any number of times never locks anyone out, while wrong
+        // passwords still are limited.
+        if (countOnlyFailures) {
+            const counted = entry;
+            res.on('finish', () => {
+                if (res.statusCode < 400 && counted.count > 0) counted.count -= 1;
+            });
         }
         next();
     };

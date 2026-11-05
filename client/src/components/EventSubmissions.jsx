@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../utils/axios';
 import { formatDateTime } from '../utils/format';
+import useRefreshOnFocus from '../utils/useRefreshOnFocus';
 
 const FIELD_LABELS = { title: 'Title', description: 'Description', date: 'Date & time', location: 'Location', ticketPrice: 'Ticket price' };
 
@@ -32,6 +33,8 @@ const EventSubmissions = ({ onReviewed, onNotice }) => {
     }, [onNotice]);
 
     useEffect(() => { load(); }, [load]);
+    // New submissions arrive while the admin works elsewhere.
+    useRefreshOnFocus(load);
 
     const review = async (event, decision) => {
         let reason;
@@ -41,7 +44,9 @@ const EventSubmissions = ({ onReviewed, onNotice }) => {
         }
         setBusyId(event._id);
         try {
-            const { data } = await api.put(`/events/${event._id}/review`, { decision, reason: reason?.trim() || undefined });
+            // version = exactly what this admin is looking at; the server refuses if it changed.
+            const version = event.status === 'pending_review' ? event.updatedAt : event.pendingChanges?.submittedAt;
+            const { data } = await api.put(`/events/${event._id}/review`, { decision, reason: reason?.trim() || undefined, version });
             const what = data.reviewed === 'changes' ? 'Changes to' : 'Event';
             let text = `${what} "${data.event.title}" ${decision === 'approve' ? 'approved' : 'rejected'}.`;
             if (!data.emailSent) text += ' The organiser could not be emailed.';

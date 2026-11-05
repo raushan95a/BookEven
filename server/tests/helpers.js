@@ -113,6 +113,16 @@ const bootApp = async (replSet, uri) => {
         userId: user._id, eventId: event._id, status: 'pending', amount: event.ticketPrice,
         eventSnapshot: { title: event.title, date: event.date }, ...overrides
     });
+    // Some emails are sent in the background after the reply; wait for one to be recorded.
+    const waitForEmail = async (predicate, timeoutMs = 3000) => {
+        const end = Date.now() + timeoutMs;
+        while (Date.now() < end) {
+            const found = emails.find(predicate);
+            if (found) return found;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return undefined;
+    };
     const lastCode = (to, type) => [...emails].reverse().find((e) => e.to === to && e.type === type && e.delivered)?.code;
 
     const stop = async () => {
@@ -123,7 +133,7 @@ const bootApp = async (replSet, uri) => {
     };
 
     return {
-        uri, base, api, emails, emailControl, lastCode, mongoose, models: { User, Event, Booking, OTP },
+        uri, base, api, emails, emailControl, lastCode, waitForEmail, mongoose, models: { User, Event, Booking, OTP },
         makeUser, makeAdmin, makeEvent, makeBooking, tokenFor, stop
     };
 };

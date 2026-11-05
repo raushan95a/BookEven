@@ -106,8 +106,10 @@ exports.verifyOTP = async (req, res, next) => {
     }
 };
 
-// Sends a new account-verification code. The reply is the same whether or not the
-// account exists or is already verified, so it can't be used to look up accounts.
+// Sends a new account-verification code. Unknown and already-verified accounts get the
+// same reply as a successful send. A 429 (code sent under a minute ago) or 503 (email
+// failed) only happens for an existing unverified account; that reveals no more than
+// /register already does ("User already exists").
 exports.resendOTP = async (req, res, next) => {
     try {
         const email = requireLoginEmail(req.body.email);

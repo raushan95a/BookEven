@@ -17,6 +17,20 @@ const EVENT_DELETED_REASON = 'Event deleted by organiser';
 const hasEventStarted = (event) => event.date.getTime() <= Date.now();
 
 /**
+ * The single set of rules for whether an event can be booked right now. Used for the
+ * quick check before a booking code is spent, and again inside the booking transaction.
+ */
+const assertBookable = (event) => {
+    // Events waiting for review (or rejected) cannot be booked.
+    if (!event || !event.isPublished()) throw new HttpError(404, 'Event not found');
+    if (hasEventStarted(event)) throw new HttpError(400, 'This event has already started');
+    if (event.availableSeats <= 0) throw new HttpError(400, 'No seats available');
+};
+
+// When a booking is returned to an attendee, the event's review details stay private.
+const PUBLIC_EVENT_FIELDS = '-pendingChanges -reviewNote -reviewedBy -reviewedAt';
+
+/**
  * Creates a booking request for an event, in one transaction.
  * - 'manual' events: the booking is 'pending' and takes no seat until an admin approves.
  * - 'auto' events: the booking is 'confirmed' at once and takes a seat in the same
@@ -26,10 +40,7 @@ const hasEventStarted = (event) => event.date.getTime() <= Date.now();
 const createBooking = async ({ user, eventId }) => {
     const bookingId = await withTransaction(async (session) => {
         const event = await Event.findById(eventId).session(session);
-        // Events waiting for review (or rejected) cannot be booked.
-        if (!event || !event.isPublished()) throw new HttpError(404, 'Event not found');
-        if (hasEventStarted(event)) throw new HttpError(400, 'This event has already started');
-        if (event.availableSeats <= 0) throw new HttpError(400, 'No seats available');
+        assertBookable(event);
 
         const auto = event.approvalMode === 'auto';
         if (auto) {
@@ -62,7 +73,7 @@ const createBooking = async ({ user, eventId }) => {
         }
     });
 
-    const booking = await Booking.findById(bookingId).populate('eventId');
+    const booking = await Booking.findById(bookingId).populate('eventId', PUBLIC_EVENT_FIELDS);
     return { booking, autoConfirmed: booking.status === 'confirmed' };
 };
 
@@ -240,6 +251,8 @@ const deleteEventWithBookings = async ({ eventId, actorId }) => {
 };
 
 module.exports = {
+    assertBookable,
+    PUBLIC_EVENT_FIELDS,
     createBooking,
     setPaymentStatus,
     confirmBooking,

@@ -21,7 +21,7 @@ BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. 
   - Approve, cancel, decline and event deletion each run in a MongoDB transaction: all of it happens or none of it does.
   - Deleting an event cancels its active bookings, keeps them as history and emails the users.
 - **Emails** (Nodemailer + Gmail): verification codes, booking confirmed, request declined, event cancelled. If an email cannot be sent, the API says so instead of failing silently.
-- **Security**: input validation on every endpoint, protection against NoSQL injection, rate limits on login/sign-up/codes/bookings, security headers, CORS allow-list, server refuses to start with a weak or published JWT secret.
+- **Security**: input validation on every endpoint, protection against NoSQL injection, rate limits on login/sign-up/codes/bookings (login limits count only failed attempts, so correct logins never lock anyone out), security headers, CORS allow-list, server refuses to start with a weak or published JWT secret.
 
 ---
 
@@ -29,7 +29,7 @@ BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. 
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) 18 or newer.
-- A MongoDB database that supports **transactions**: [MongoDB Atlas](https://www.mongodb.com/cloud/atlas/register) (the free tier works) or a local replica set. A plain standalone `mongod` is **not** supported; the server refuses to start on one.
+- **MongoDB 6.0 or newer** with **transactions**: [MongoDB Atlas](https://www.mongodb.com/cloud/atlas/register) (the free tier works) or a local replica set. A plain standalone `mongod`, or a version older than 6.0, is **not** supported; the server refuses to start on one.
 - A Gmail account with an **App Password** for sending email (see [SETUP_GUIDE.md](SETUP_GUIDE.md)).
 
 ### 1. Server environment (`server/.env`)
@@ -136,8 +136,8 @@ Base URL: `http://localhost:5000/api`. Authenticated requests send `Authorizatio
 | POST | `/bookings` | User | Request a seat: `{ eventId, otp }`. Pending, or confirmed at once (`autoConfirmed: true`) on auto-approve events |
 | GET | `/bookings/my` | User | The caller's own bookings |
 | DELETE | `/bookings/:id` | Owner / Organiser / Admin | Cancel; a confirmed seat is returned |
-| GET | `/bookings?page=&limit=&status=&eventId=` | Admin / Organiser | Bookings, newest first, 20 per page (max 100). Organisers get only their own events' bookings |
-| GET | `/bookings/stats?eventId=` | Admin / Organiser | Revenue, paid clients, counts by status (organisers: their events only) |
+| GET | `/bookings?offset=&limit=&status=&eventId=` | Admin / Organiser | Bookings, newest first, 20 per page (max 100); `offset` = how many to skip (`page=` also accepted); `hasMore` tells whether more remain. Organisers get only their own events' bookings |
+| GET | `/bookings/stats?eventId=` | Admin / Organiser | Revenue, paid clients (people who paid more than ₹0), counts by status (organisers: their events only) |
 | PUT | `/bookings/:id/confirm` | Admin / Organiser | Approve: `{ paymentStatus: "paid" \| "not_paid" }` |
 | PUT | `/bookings/:id/reject` | Admin / Organiser | Decline: `{ reason? }` (max 500 characters) |
 | PUT | `/bookings/:id/payment` | Admin / Organiser | Record payment on a confirmed booking: `{ paymentStatus: "paid" \| "not_paid" }` |
