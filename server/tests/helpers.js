@@ -58,6 +58,13 @@ const bootApp = async (replSet, uri) => {
     email.sendBookingEmail = async (to, name, title) => record({ to, type: 'confirmed', name, title });
     email.sendEventCancelledEmail = async (to, name, title) => record({ to, type: 'event_cancelled', name, title });
     email.sendBookingRejectedEmail = async (to, name, title, reason) => record({ to, type: 'rejected', name, title, reason });
+    email.sendEventSubmittedEmail = async (to, organiser, title, kind) => record({ to, type: 'event_submitted', organiser, title, kind });
+    email.sendEventReviewEmail = async (to, name, title, decision, kind, reason) => record({ to, type: 'event_review', name, title, decision, kind, reason });
+    // Any other send* function added later is recorded too, never sent.
+    const stubbed = new Set(['sendOTPEmail', 'sendBookingEmail', 'sendEventCancelledEmail', 'sendBookingRejectedEmail', 'sendEventSubmittedEmail', 'sendEventReviewEmail']);
+    for (const key of Object.keys(email)) {
+        if (key.startsWith('send') && !stubbed.has(key)) email[key] = async (to) => record({ to, type: key });
+    }
 
     const mongoose = require('mongoose');
     const jwt = require('jsonwebtoken');

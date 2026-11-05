@@ -17,7 +17,8 @@
  *   3. Cancel pending/confirmed bookings whose event no longer exists.
  *   4. Fill in the event title/date snapshot on bookings whose event still exists.
  *   5. Recompute each event's availableSeats as totalSeats minus confirmed bookings.
- *   6. Create the new indexes.
+ *   6. Mark events without a review status as published (they were all public before).
+ *   7. Create the new indexes.
  *
  * Exit codes: 0 = done / nothing blocking, 2 = blocking problems found, 1 = error.
  */
@@ -41,7 +42,7 @@ const ACTIVE = Booking.ACTIVE_STATUSES;
 const ORPHAN_REASON = 'Event deleted by organiser';
 const NEW_INDEXES = {
     bookings: ['one_active_booking_per_user_event', 'eventId_1_status_1', 'userId_1_createdAt_-1'],
-    events: ['date_1', 'category_1']
+    events: ['date_1', 'category_1', 'status_1_date_1', 'createdBy_1']
 };
 
 const parseArgs = (argv) => {
@@ -137,6 +138,7 @@ const migrate = async (db, apply) => {
     const duplicates = await planDuplicateBookings(db);
     const links = await planBookingsVsEvents(db);
     const seats = await planSeats(db);
+    const unstatused = await db.collection('events').countDocuments({ status: { $exists: false } });
     const indexes = await planIndexes(db);
 
     log('\n1. User emails');
@@ -169,7 +171,10 @@ const migrate = async (db, apply) => {
         log(`   "${s.title}": availableSeats ${s.current} -> ${s.expected}${s.overbookedBy ? `  (WARNING: overbooked by ${s.overbookedBy}; needs manual follow-up)` : ''}`);
     }
 
-    log('\n6. Indexes');
+    log('\n6. Event review status');
+    log(`   ${plural(unstatused, 'event')} to mark as published`);
+
+    log('\n7. Indexes');
     log(indexes.length ? `   to create: ${indexes.join(', ')}` : '   all present');
 
     const blocking = emails.collisions.length + duplicates.length;
@@ -215,6 +220,10 @@ const migrate = async (db, apply) => {
         })));
     }
 
+    if (unstatused) {
+        await db.collection('events').updateMany({ status: { $exists: false } }, { $set: { status: 'published' } });
+    }
+
     // createIndexes only adds; it never drops an index.
     for (const Model of [User, Event, Booking, OTP]) {
         await Model.createCollection().catch(() => {});
@@ -234,6 +243,11 @@ const rollback = async (db, apply) => {
     const withNewFields = await bookings.countDocuments({
         $or: [{ eventSnapshot: { $exists: true } }, { statusChangedBy: { $exists: true } }, { statusChangedAt: { $exists: true } }, { statusReason: { $exists: true } }]
     });
+    const events = db.collection('events');
+    const unpublished = await events.countDocuments({ status: { $in: ['pending_review', 'rejected'] } });
+    const eventsWithNewFields = await events.countDocuments({
+        $or: [{ status: { $exists: true } }, { reviewNote: { $exists: true } }, { reviewedBy: { $exists: true } }, { reviewedAt: { $exists: true } }, { pendingChanges: { $exists: true } }]
+    });
     const present = [];
     for (const [collection, names] of Object.entries(NEW_INDEXES)) {
         const existing = await existingIndexNames(db, collection);
@@ -244,6 +258,10 @@ const rollback = async (db, apply) => {
     log(`   ${plural(rejected, 'rejected booking')} -> cancelled`);
     log(`   ${plural(withNewFields, 'booking')}: remove eventSnapshot/statusChangedBy/statusChangedAt/statusReason`);
     log(`   indexes to drop: ${present.length ? present.map(([c, n]) => `${c}.${n}`).join(', ') : 'none'}`);
+    log(`   ${plural(eventsWithNewFields, 'event')}: remove status/reviewNote/reviewedBy/reviewedAt/pendingChanges`);
+    if (unpublished) {
+        log(`   WARNING: ${plural(unpublished, 'event')} waiting for review or rejected will become PUBLIC under the old code. Review or delete them first.`);
+    }
     log('   emails stay lowercased (harmless for the old code)');
     log('   Roll the code back first: the new server re-creates these indexes when it starts.');
 
@@ -255,6 +273,7 @@ const rollback = async (db, apply) => {
     log('\nApplying rollback...');
     await bookings.updateMany({ status: 'rejected' }, { $set: { status: 'cancelled' } });
     await bookings.updateMany({}, { $unset: { eventSnapshot: '', statusChangedBy: '', statusChangedAt: '', statusReason: '' } });
+    await events.updateMany({}, { $unset: { status: '', reviewNote: '', reviewedBy: '', reviewedAt: '', pendingChanges: '' } });
     for (const [collection, name] of present) await db.collection(collection).dropIndex(name);
     log('Done.');
     return 0;

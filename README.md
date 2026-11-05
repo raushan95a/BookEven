@@ -1,6 +1,6 @@
 # BookEven - Full-Stack Event Booking Platform
 
-BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. Admins publish free or paid events; attendees verify their email, request a seat with a one-time code, and an admin approves or declines each request. Payment happens outside the app (cash, UPI, bank transfer) and the admin records it when approving.
+BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. Admins publish free or paid events, and any user can host their own events once an admin approves them; attendees verify their email, request a seat with a one-time code, and the organiser or an admin approves or declines each request. Payment happens outside the app (cash, UPI, bank transfer) and the admin records it when approving.
 
 ## Features
 - **Accounts**: registration with email verification code, login with JWT (valid 7 days), bcrypt-hashed passwords. Emails are case-insensitive.
@@ -8,6 +8,11 @@ BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. 
 - **Roles**:
   - **Admin**: create, edit and delete events; choose per event whether requests need approval or are **auto-approved**; approve requests as *Paid* or *Not paid*; mark confirmed bookings as paid later; decline requests with an optional reason; see revenue, paid clients and pending requests; filter and page through all bookings.
   - **User**: browse upcoming events, request a seat with an email code, see status and reasons in *My Bookings*, cancel, and request again after a decline.
+  - **Organiser** (any user, for the events they create): **Host an Event** submits an event for admin review. Once approved, the organiser manages that event in *My Events*: its bookings (approve, decline, mark paid, cancel), stats, edits and deletion. Organisers never see other organisers' events or bookings.
+- **Event review**:
+  - A user's new event is *Waiting for approval*: hidden from the public and not bookable. Admins are emailed and review it under *Event Submissions*; the organiser is emailed the result (with the reason if rejected). Editing a rejected event sends it back for review.
+  - On a published event, changes to the title, description, date, location or price wait for admin approval while the event stays live and bookable as it is. Seats, image, category and booking approval change immediately.
+  - Events created by an admin are published straight away.
 - **Booking rules**:
   - Each event has a **booking approval** setting: *Admin approves each request* (default) or *Auto-approve*, where a request is confirmed and takes a seat immediately. Free auto-approved bookings count as paid; paid ones are marked paid by the admin later.
   - On approval-required events a seat is taken only when an admin approves. Neither mode can overbook, even when many people book at once.
@@ -92,12 +97,13 @@ Runs every automated test (about 25 seconds) against **in-memory MongoDB replica
 - database integrity: duplicate prevention, transaction rollback, concurrent approvals and cancellations, event deletion (`tests/wp1.integrity.test.js`),
 - the data migration script (`tests/wp1.migration.test.js`),
 - every API endpoint, email failure handling, pagination, stats and a full user journey (`tests/wp2.api.test.js`),
-- auto-approval: instant confirmation, last-seat races, rollback and recording payment (`tests/auto-approval.test.js`).
+- auto-approval: instant confirmation, last-seat races, rollback and recording payment (`tests/auto-approval.test.js`),
+- hosting events: submission and review, proposed changes, and that organisers can only reach their own events and bookings (`tests/wp5.organiser.test.js`).
 
 Build check for the client: `cd client && npm run build`.
 
 ## Database migration (for existing data)
-`server/scripts/migrate-phase2.js` brings a database created by an older version up to date: lowercases emails, cancels bookings whose event no longer exists, fills in event snapshots on bookings, recomputes seat counts and creates indexes.
+`server/scripts/migrate-phase2.js` brings a database created by an older version up to date: lowercases emails, cancels bookings whose event no longer exists, fills in event snapshots on bookings, recomputes seat counts, marks existing events as published and creates indexes.
 ```bash
 cd server
 npm run migrate:phase2                                   # dry run: reports only, changes nothing
@@ -118,21 +124,25 @@ Base URL: `http://localhost:5000/api`. Authenticated requests send `Authorizatio
 | POST | `/auth/resend-otp` | Public | New verification code (`429` with `retryAfterSeconds` within 60 s) |
 | POST | `/auth/login` | Public | Log in; `403 needsVerification` for unverified accounts |
 | GET | `/events?when=upcoming\|past\|all&search=&category=` | Public | List events (`upcoming`: soonest first) |
-| GET | `/events/:id` | Public | Event details |
-| POST | `/events` | Admin | Create event (date must be in the future; `approvalMode`: `manual` (default) or `auto`) |
-| PUT | `/events/:id` | Admin | Update any of: title, description, date, location, category, totalSeats, ticketPrice, image, approvalMode |
-| DELETE | `/events/:id` | Admin | Delete event, cancel its active bookings, email users |
+| GET | `/events/:id` | Public | Event details (unpublished events only for their organiser and admins) |
+| GET | `/events?scope=all` | Admin | Every event, including ones waiting for review or rejected |
+| GET | `/events/mine` | User | Events the caller created, any status |
+| POST | `/events` | User | Create event (date in the future; `approvalMode`: `manual` (default) or `auto`). Admin: published at once; others: `pending_review` |
+| PUT | `/events/:id` | Admin / Organiser | Update any of: title, description, date, location, category, totalSeats, ticketPrice, image, approvalMode. Organiser edits to a published event's title, description, date, location or price go to `pendingChanges` (`changesAwaitingReview` lists them) |
+| DELETE | `/events/:id` | Admin / Organiser | Delete event, cancel its active bookings, email users |
+| GET | `/events/review` | Admin | Events waiting for review and events with proposed changes |
+| PUT | `/events/:id/review` | Admin | `{ decision: "approve" \| "reject", reason? }` for a new event or its proposed changes; emails the organiser |
 | POST | `/bookings/send-otp` | User | Email a booking code |
 | POST | `/bookings` | User | Request a seat: `{ eventId, otp }`. Pending, or confirmed at once (`autoConfirmed: true`) on auto-approve events |
 | GET | `/bookings/my` | User | The caller's own bookings |
-| DELETE | `/bookings/:id` | Owner / Admin | Cancel; a confirmed seat is returned |
-| GET | `/bookings?page=&limit=&status=&eventId=` | Admin | All bookings, newest first, 20 per page (max 100) |
-| GET | `/bookings/stats?eventId=` | Admin | Revenue, paid clients, counts by status |
-| PUT | `/bookings/:id/confirm` | Admin | Approve: `{ paymentStatus: "paid" \| "not_paid" }` |
-| PUT | `/bookings/:id/reject` | Admin | Decline: `{ reason? }` (max 500 characters) |
-| PUT | `/bookings/:id/payment` | Admin | Record payment on a confirmed booking: `{ paymentStatus: "paid" | "not_paid" }` |
+| DELETE | `/bookings/:id` | Owner / Organiser / Admin | Cancel; a confirmed seat is returned |
+| GET | `/bookings?page=&limit=&status=&eventId=` | Admin / Organiser | Bookings, newest first, 20 per page (max 100). Organisers get only their own events' bookings |
+| GET | `/bookings/stats?eventId=` | Admin / Organiser | Revenue, paid clients, counts by status (organisers: their events only) |
+| PUT | `/bookings/:id/confirm` | Admin / Organiser | Approve: `{ paymentStatus: "paid" \| "not_paid" }` |
+| PUT | `/bookings/:id/reject` | Admin / Organiser | Decline: `{ reason? }` (max 500 characters) |
+| PUT | `/bookings/:id/payment` | Admin / Organiser | Record payment on a confirmed booking: `{ paymentStatus: "paid" \| "not_paid" }` |
 
-Booking statuses: `pending` → `confirmed` or `rejected`; `pending`/`confirmed` → `cancelled`.
+"Organiser" means the user who created the booking's event. Booking statuses: `pending` → `confirmed` or `rejected`; `pending`/`confirmed` → `cancelled`. Event statuses: `pending_review` → `published` or `rejected`; `rejected` → `pending_review` when edited.
 
 ---
 

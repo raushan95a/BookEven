@@ -226,13 +226,16 @@ describe('2.4 admin bookings list', () => {
         assert.equal(r.data.total, 15);
     });
 
-    test('bad parameters return 400; non-admin 403; no token 401', async () => {
+    test('bad parameters return 400; a non-admin with no events sees nothing; no token 401', async () => {
         const token = t.tokenFor(admin);
         for (const q of ['status=deleted', 'limit=0', 'limit=101', 'limit=abc', 'page=0', 'page=1.5', 'eventId=xyz', 'status[$ne]=x', 'eventId[$ne]=x']) {
             const r = await t.api('GET', `/bookings?${q}`, { token });
             assert.equal(r.status, 400, q);
         }
-        assert.equal((await t.api('GET', '/bookings', { token: t.tokenFor(await t.makeUser()) })).status, 403);
+        // [WP5 rule] Non-admins get only bookings for events they organise: none here.
+        const asUser = await t.api('GET', '/bookings', { token: t.tokenFor(await t.makeUser()) });
+        assert.equal(asUser.status, 200);
+        assert.equal(asUser.data.total, 0);
         assert.equal((await t.api('GET', '/bookings')).status, 401);
     });
 
@@ -285,7 +288,10 @@ describe('2.5 admin stats', () => {
         assert.equal(r.status, 400);
         r = await t.api('GET', '/bookings/stats?status=pending', { token: t.tokenFor(admin) });
         assert.equal(r.status, 400);
-        assert.equal((await t.api('GET', '/bookings/stats', { token: t.tokenFor(await t.makeUser()) })).status, 403);
+        // [WP5 rule] Non-admins get stats only for events they organise: none here.
+        const asUser = await t.api('GET', '/bookings/stats', { token: t.tokenFor(await t.makeUser()) });
+        assert.equal(asUser.status, 200);
+        assert.equal(asUser.data.totalBookings, 0);
     });
 });
 

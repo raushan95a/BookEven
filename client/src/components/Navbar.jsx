@@ -24,6 +24,9 @@ const Navbar = () => {
                         {user ? (
                             <>
                                 <Link to={user.role === 'admin' ? '/admin' : '/dashboard'} className="text-gray-200 hover:text-white transition">Dashboard</Link>
+                                {user.role !== 'admin' && (
+                                    <Link to="/organiser" className="text-gray-200 hover:text-white transition">Host an Event</Link>
+                                )}
                                 <button onClick={handleLogout} className="bg-gray-700 hover:bg-black text-white px-4 py-2 rounded-md transition">Logout</button>
                             </>
                         ) : (

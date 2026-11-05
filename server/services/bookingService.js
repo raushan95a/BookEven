@@ -3,6 +3,7 @@ const Booking = require('../models/Booking');
 const Event = require('../models/Event');
 const { withTransaction } = require('../utils/transaction');
 const { HttpError } = require('../utils/validation');
+const { isAdmin, ownsEvent } = require('../utils/permissions');
 
 const { ACTIVE_STATUSES } = Booking;
 const PAYMENT_STATUSES = ['paid', 'not_paid'];
@@ -25,7 +26,8 @@ const hasEventStarted = (event) => event.date.getTime() <= Date.now();
 const createBooking = async ({ user, eventId }) => {
     const bookingId = await withTransaction(async (session) => {
         const event = await Event.findById(eventId).session(session);
-        if (!event) throw new HttpError(404, 'Event not found');
+        // Events waiting for review (or rejected) cannot be booked.
+        if (!event || !event.isPublished()) throw new HttpError(404, 'Event not found');
         if (hasEventStarted(event)) throw new HttpError(400, 'This event has already started');
         if (event.availableSeats <= 0) throw new HttpError(400, 'No seats available');
 
@@ -132,15 +134,17 @@ const confirmBooking = async ({ bookingId, paymentStatus, actorId }) => {
 };
 
 /**
- * Cancels a pending or confirmed booking. Owners can cancel their own; admins any.
+ * Cancels a pending or confirmed booking. The booking's owner, the event's organiser
+ * and admins may cancel it.
  * A confirmed seat is returned to the event.
  */
 const cancelBooking = async ({ bookingId, actor }) => {
     return withTransaction(async (session) => {
         const booking = await Booking.findById(bookingId).session(session);
         if (!booking) throw new HttpError(404, 'Booking not found');
-        if (booking.userId.toString() !== actor.id && actor.role !== 'admin') {
-            throw new HttpError(403, 'Not authorized');
+        if (booking.userId.toString() !== actor.id && !isAdmin(actor)) {
+            const event = await Event.findById(booking.eventId).select('createdBy').session(session);
+            if (!ownsEvent(actor, event)) throw new HttpError(403, 'Not authorized');
         }
         if (!ACTIVE_STATUSES.includes(booking.status)) throw new HttpError(400, 'Already cancelled');
 

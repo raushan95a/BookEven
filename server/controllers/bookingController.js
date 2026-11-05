@@ -5,6 +5,7 @@ const { sendBookingEmail, sendBookingRejectedEmail } = require('../utils/email')
 const { consumeOTP, deliverOTP, EMAIL_FAILED_MESSAGE } = require('../utils/otp');
 const { HttpError, requireObjectId, requireOtp, requireNumber, optionalString } = require('../utils/validation');
 const bookingService = require('../services/bookingService');
+const { isAdmin, ownsEvent } = require('../utils/permissions');
 
 const { ACTIVE_STATUSES } = Booking;
 const ALL_STATUSES = Booking.schema.path('status').enumValues;
@@ -35,7 +36,8 @@ exports.bookEvent = async (req, res, next) => {
 
         // Check the event before using up the OTP, so a failed check doesn't cost the user their code.
         const event = await Event.findById(eventId);
-        if (!event) throw new HttpError(404, 'Event not found');
+        // Events waiting for review (or rejected) cannot be booked.
+        if (!event || !event.isPublished()) throw new HttpError(404, 'Event not found');
         if (hasEventStarted(event)) throw new HttpError(400, 'This event has already started');
         if (event.availableSeats <= 0) throw new HttpError(400, 'No seats available');
 
@@ -64,9 +66,30 @@ exports.bookEvent = async (req, res, next) => {
     }
 };
 
+// Admins manage every booking; an organiser only the bookings for their own events.
+const assertCanManageBooking = async (user, bookingId) => {
+    if (isAdmin(user)) return;
+    const booking = await Booking.findById(bookingId).select('eventId');
+    if (!booking) throw new HttpError(404, 'Booking not found');
+    const event = await Event.findById(booking.eventId).select('createdBy');
+    if (!ownsEvent(user, event)) throw new HttpError(403, 'Not authorized to manage this booking');
+};
+
+// Limits a list/stats filter to the events the caller may manage.
+const scopeToManagedEvents = async (user, filter) => {
+    if (isAdmin(user)) return filter;
+    const ids = await Event.find({ createdBy: user._id }).distinct('_id');
+    if (filter.eventId) {
+        if (!ids.some((id) => id.equals(filter.eventId))) throw new HttpError(403, 'Not authorized for this event');
+        return filter;
+    }
+    return { ...filter, eventId: mongoose.trusted({ $in: ids }) };
+};
+
 exports.confirmBooking = async (req, res, next) => {
     try {
         const bookingId = requireObjectId(req.params.id, 'booking id');
+        await assertCanManageBooking(req.user, bookingId);
         const confirmed = await bookingService.confirmBooking({
             bookingId,
             paymentStatus: req.body.paymentStatus,
@@ -90,6 +113,7 @@ exports.confirmBooking = async (req, res, next) => {
 exports.updatePaymentStatus = async (req, res, next) => {
     try {
         const bookingId = requireObjectId(req.params.id, 'booking id');
+        await assertCanManageBooking(req.user, bookingId);
         const booking = await bookingService.setPaymentStatus({ bookingId, paymentStatus: req.body.paymentStatus });
         res.json({ message: 'Payment status updated', booking });
     } catch (error) {
@@ -100,6 +124,7 @@ exports.updatePaymentStatus = async (req, res, next) => {
 exports.rejectBooking = async (req, res, next) => {
     try {
         const bookingId = requireObjectId(req.params.id, 'booking id');
+        await assertCanManageBooking(req.user, bookingId);
         const rejected = await bookingService.rejectBooking({
             bookingId,
             actorId: req.user._id,
@@ -142,10 +167,11 @@ const adminFilter = (query) => {
     return filter;
 };
 
-// GET /api/bookings (admin) — paginated, newest first, filterable by status and event.
+// GET /api/bookings — admins: every booking; organisers: bookings for their own events.
+// Paginated, newest first, filterable by status and event.
 exports.listBookings = async (req, res, next) => {
     try {
-        const filter = adminFilter(req.query);
+        const filter = await scopeToManagedEvents(req.user, adminFilter(req.query));
         const page = req.query.page === undefined ? 1 : requireNumber(req.query.page, 'page', { min: 1, max: 100000, integer: true });
         const limit = req.query.limit === undefined
             ? DEFAULT_PAGE_SIZE
@@ -171,8 +197,9 @@ exports.listBookings = async (req, res, next) => {
 // with the same rules the dashboard used before (confirmed + paid counts as revenue).
 exports.getBookingStats = async (req, res, next) => {
     try {
-        const { status, ...filter } = adminFilter(req.query);
+        const { status, ...requested } = adminFilter(req.query);
         if (status !== undefined) throw new HttpError(400, 'status filter is not supported for stats');
+        const filter = await scopeToManagedEvents(req.user, requested);
 
         const [result] = await Booking.aggregate([
             { $match: filter },

@@ -391,6 +391,157 @@
                     }
                 },
                 {
+                    "name": "Submit event (organiser)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "if (pm.response.code === 201) pm.collectionVariables.set('submitted_event_id', pm.response.json()._id);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{user_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"title\": \"Community Meetup\",\n    \"description\": \"Hosted by a user.\",\n    \"date\": \"2027-03-15T18:30:00.000Z\",\n    \"location\": \"Library\",\n    \"category\": \"Community\",\n    \"totalSeats\": 30,\n    \"ticketPrice\": 0,\n    \"image\": \"\",\n    \"approvalMode\": \"manual\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/events",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "events"
+                            ]
+                        },
+                        "description": "Any signed-in user can submit an event. It is created with status pending_review (hidden, not bookable) until an admin approves it. Saves submitted_event_id."
+                    }
+                },
+                {
+                    "name": "My events (organiser)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{user_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/events/mine",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "events",
+                                "mine"
+                            ]
+                        },
+                        "description": "Events the caller created, any status (pending_review, published, rejected), newest first."
+                    }
+                },
+                {
+                    "name": "Review queue (admin)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/events/review",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "events",
+                                "review"
+                            ]
+                        },
+                        "description": "New events waiting for approval and published events with proposed changes (pendingChanges)."
+                    }
+                },
+                {
+                    "name": "Review event (admin)",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"decision\": \"approve\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/events/{{submitted_event_id}}/review",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "events",
+                                "{{submitted_event_id}}",
+                                "review"
+                            ]
+                        },
+                        "description": "decision: 'approve' or 'reject' (reason optional, max 500). Works on a new event or on a published event's proposed changes. Emails the organiser."
+                    }
+                },
+                {
                     "name": "Delete event (admin)",
                     "request": {
                         "method": "DELETE",
@@ -415,7 +566,7 @@
                                 "{{event_id}}"
                             ]
                         },
-                        "description": "Deletes the event, cancels its pending/confirmed bookings (kept as history) and emails those users. Returns cancelledBookings, emailsSent, emailsFailed."
+                        "description": "Admin or the event organiser. Deletes the event, cancels its pending/confirmed bookings (kept as history) and emails those users. Returns cancelledBookings, emailsSent, emailsFailed."
                     }
                 }
             ]
@@ -797,6 +948,11 @@
         },
         {
             "key": "event_id",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "submitted_event_id",
             "value": "",
             "type": "string"
         },

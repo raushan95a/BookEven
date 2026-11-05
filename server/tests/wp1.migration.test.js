@@ -113,6 +113,7 @@ describe('migrate-phase2', () => {
         assert.match(r.out, /4 bookings to fill in/);
         assert.match(r.out, /2 bookings whose event is already gone/);
         assert.match(r.out, /"Concert": availableSeats 10 -> 8/);
+        assert.match(r.out, /2 events to mark as published/);
         assert.match(r.out, /to create: bookings\.one_active_booking_per_user_event/);
         assert.match(r.out, /Dry run only/);
         assert.deepEqual(await snapshot(), before);
@@ -147,6 +148,7 @@ describe('migrate-phase2', () => {
 
         assert.equal((await db.collection('events').findOne({ _id: ids.concert })).availableSeats, 8);
         assert.equal((await db.collection('events').findOne({ _id: ids.talk })).availableSeats, 5);
+        assert.equal(await db.collection('events').countDocuments({ status: 'published' }), 2);
 
         const bookingIndexes = (await db.collection('bookings').indexes()).map((i) => i.name);
         assert.ok(bookingIndexes.includes('one_active_booking_per_user_event'));
@@ -164,6 +166,7 @@ describe('migrate-phase2', () => {
         assert.match(r.out, /0 bookings to cancel/);
         assert.match(r.out, /0 bookings to fill in/);
         assert.match(r.out, /all consistent/);
+        assert.match(r.out, /0 events to mark as published/);
         assert.match(r.out, /all present/);
         r = await migrate('--apply', `--db=${DB}`);
         assert.equal(r.code, 0, r.out);
@@ -183,6 +186,7 @@ describe('migrate-phase2', () => {
         assert.equal(await db.collection('bookings').countDocuments({ status: 'rejected' }), 0);
         assert.equal(await db.collection('bookings').countDocuments({ eventSnapshot: { $exists: true } }), 0);
         assert.equal(await db.collection('bookings').countDocuments({ statusReason: { $exists: true } }), 0);
+        assert.equal(await db.collection('events').countDocuments({ status: { $exists: true } }), 0);
         const bookingIndexes = (await db.collection('bookings').indexes()).map((i) => i.name);
         assert.deepEqual(bookingIndexes, ['_id_']);
         const eventIndexes = (await db.collection('events').indexes()).map((i) => i.name);

@@ -25,6 +25,8 @@ const oneLine = (text) => String(text).replace(/[\r\n]/g, ' ');
  * pretending it worked. Failures are logged without the message body.
  */
 const deliver = async (label, mailOptions) => {
+    // Safety net: automated tests must never send real email, even if a test forgets a stub.
+    if (process.env.NODE_ENV === 'test') return true;
     try {
         await transporter.sendMail({ from: process.env.EMAIL_USER, ...mailOptions });
         console.log(`${label} email sent to`, mailOptions.to);
@@ -93,7 +95,54 @@ const sendBookingRejectedEmail = (userEmail, userName, eventTitle, reason) => de
       `
 });
 
+// To an admin when an organiser submits a new event, resubmits one, or proposes changes.
+// kind: 'new' | 'resubmitted' | 'changes'
+const sendEventSubmittedEmail = (adminEmail, organiserName, eventTitle, kind) => {
+    const what = {
+        new: 'submitted a new event',
+        resubmitted: 'resubmitted an event after changes',
+        changes: 'proposed changes to a published event'
+    }[kind] || 'submitted an event';
+    return deliver('Event submission', {
+        to: adminEmail,
+        subject: `Review needed: ${oneLine(eventTitle)}`,
+        html: `
+        <h2>An event needs your review</h2>
+        <p><strong>${escapeHtml(organiserName)}</strong> ${what}: <strong>${escapeHtml(eventTitle)}</strong>.</p>
+        <p>Open the Admin Dashboard and look under <em>Event submissions</em> to approve or reject it.</p>
+      `
+    });
+};
+
+// To the organiser after an admin reviews their event or their proposed changes.
+// decision: 'approve' | 'reject'; kind: 'event' | 'changes'
+const sendEventReviewEmail = (organiserEmail, organiserName, eventTitle, decision, kind, reason) => {
+    const approved = decision === 'approve';
+    const subject = kind === 'changes'
+        ? `Changes ${approved ? 'approved' : 'not approved'}: ${oneLine(eventTitle)}`
+        : `Event ${approved ? 'approved' : 'not approved'}: ${oneLine(eventTitle)}`;
+    const body = kind === 'changes'
+        ? (approved
+            ? 'Your changes have been approved and are now live.'
+            : 'Your proposed changes were not approved. The event stays as it was.')
+        : (approved
+            ? 'Your event has been approved. It is now public and open for bookings.'
+            : 'Your event was not approved. You can edit it and it will be sent for review again.');
+    return deliver('Event review', {
+        to: organiserEmail,
+        subject,
+        html: `
+        <h2>Hi ${escapeHtml(organiserName)},</h2>
+        <p><strong>${escapeHtml(eventTitle)}</strong>: ${body}</p>
+        ${!approved && reason ? `<p><strong>Reason:</strong> ${escapeHtml(reason)}</p>` : ''}
+        <p>Thank you for hosting with BookEven.</p>
+      `
+    });
+};
+
 module.exports = {
+    sendEventSubmittedEmail,
+    sendEventReviewEmail,
     isEmailConfigured,
     sendBookingEmail,
     sendOTPEmail,

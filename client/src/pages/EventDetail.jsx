@@ -96,17 +96,32 @@ const EventDetail = () => {
     if (error && !event) return <div className="text-center py-20 text-xl text-red-500">{error || 'Event not found'}</div>;
 
     const isSoldOut = event.availableSeats <= 0;
-    const isClosed = hasStarted(event.date);
+    // Only the organiser and admins can open an unpublished event; it cannot be booked yet.
+    const isUnpublished = event.status === 'pending_review' || event.status === 'rejected';
+    const isClosed = hasStarted(event.date) || isUnpublished;
     const buttonDisabled = isSoldOut || isClosed || bookingLoading || (showOTP && !otp);
 
     let buttonLabel = 'Confirm Registration';
     if (bookingLoading) buttonLabel = 'Processing...';
     else if (showOTP) buttonLabel = 'Verify OTP & Confirm';
+    else if (isUnpublished) buttonLabel = 'Not Published Yet';
     else if (isClosed) buttonLabel = 'Booking Closed';
     else if (isSoldOut) buttonLabel = 'Sold Out';
 
     return (
-        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden mt-8">
+        <div className="max-w-4xl mx-auto mt-8">
+        {isUnpublished && (
+            <div role="status" className={`mb-4 p-4 rounded-xl border ${event.status === 'rejected' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}>
+                <p className="font-bold">{event.status === 'rejected' ? 'This event was not approved.' : 'This event is waiting for admin approval.'}</p>
+                <p className="text-sm">Only you (and admins) can see this page. It is not listed or bookable until it is approved.{event.reviewNote ? ` Admin note: ${event.reviewNote}` : ''}</p>
+            </div>
+        )}
+        {event.pendingChanges && (
+            <div role="status" className="mb-4 p-4 rounded-xl border bg-purple-50 border-purple-200 text-purple-800 text-sm">
+                Your latest changes are waiting for admin approval. This page shows the current published version.
+            </div>
+        )}
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
             {event.image ? (
                 <img src={event.image} alt={event.title} className="w-full h-80 object-cover" />
             ) : (
@@ -243,6 +258,7 @@ const EventDetail = () => {
                     </div>
                 </div>
             </div>
+        </div>
         </div>
     );
 };

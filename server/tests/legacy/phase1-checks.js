@@ -135,7 +135,13 @@ const runServerProcess = (env, timeoutMs) => new Promise((resolve) => {
     r = await api('POST', '/events', { token: tokenFor(users[0]).replace(/.$/, 'x'), body: eventBody });
     check('Tampered signature is rejected', r.status === 401, r.status);
     r = await api('POST', '/events', { token: tokenFor(users[0]), body: eventBody });
-    check('Regular user cannot create events (403)', r.status === 403, r.status);
+    // [WP5 rule] Regular users may submit events, but they wait for admin review and stay hidden.
+    check('[WP5 rule] Regular user\'s event is submitted for review, not published', r.status === 201 && r.data.status === 'pending_review', JSON.stringify(r.data));
+    if (r.data && r.data._id) {
+        const hidden = await api('GET', `/events/${r.data._id}`);
+        check('[WP5 rule] Event waiting for review is hidden from the public (404)', hidden.status === 404, hidden.status);
+        await Event.deleteOne({ _id: r.data._id });
+    }
     r = await api('POST', '/auth/login', { body: { email: 'admin@test.com', password: 'AdminPass123' } });
     const adminToken = r.data?.token;
     check('Admin logs in with password and gets role admin', r.status === 200 && r.data.role === 'admin' && adminToken, JSON.stringify(r.data));

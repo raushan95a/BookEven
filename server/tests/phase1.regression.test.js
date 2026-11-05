@@ -3,9 +3,9 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const { spawn } = require('child_process');
 
-// Runs the original 102 Phase 1 checks (tests/legacy/phase1-checks.js) in their own
+// Runs the original Phase 1 checks (102, now 103) (tests/legacy/phase1-checks.js) in their own
 // process, because that suite boots server.js with its own in-memory database.
-test('Phase 1 regression: all 102 security and booking checks pass', { timeout: 300000 }, async () => {
+test('Phase 1 regression: all 103 security and booking checks pass', { timeout: 300000 }, async () => {
     const { code, out } = await new Promise((resolve) => {
         const child = spawn(process.execPath, [path.join(__dirname, 'legacy', 'phase1-checks.js')], {
             cwd: __dirname,
@@ -22,6 +22,7 @@ test('Phase 1 regression: all 102 security and booking checks pass', { timeout: 
     assert.ok(summary, `no summary line in output:\n${out.slice(-2000)}`);
     assert.equal(failures.length, 0, failures.join('\n'));
     assert.equal(summary[1], summary[2]);
-    assert.equal(Number(summary[2]), 102);
+    // 102 original checks; one became two when organisers could submit events (WP5).
+    assert.equal(Number(summary[2]), 103);
     assert.equal(code, 0);
 });
