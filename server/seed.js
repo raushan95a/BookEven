@@ -6,7 +6,9 @@ const User = require('./models/User');
 const Event = require('./models/Event');
 const Booking = require('./models/Booking');
 
-dotenv.config();
+// Always read server/.env, whatever folder the command is started from.
+// A project-root .env is still read as a fallback; values already set are never overridden.
+dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const users = [

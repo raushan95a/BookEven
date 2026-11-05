@@ -2,6 +2,7 @@
     "info": {
         "_postman_id": "c7a8b29e-4c5d-4a1v-b3nf-9a8x7b6c5d4e",
         "name": "BookEven APIs",
+        "description": "Every BookEven API endpoint. Set base_url, run \"Login (admin)\" and \"Login (user)\" first; tokens and ids are saved into collection variables automatically. Codes (OTP) arrive by email; paste them into the request bodies.",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "item": [
@@ -9,7 +10,7 @@
             "name": "Auth",
             "item": [
                 {
-                    "name": "Register User",
+                    "name": "Register",
                     "request": {
                         "method": "POST",
                         "header": [
@@ -18,38 +19,43 @@
                                 "value": "application/json"
                             }
                         ],
+                        "auth": {
+                            "type": "noauth"
+                        },
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"name\": \"Test User\",\n    \"email\": \"test@example.com\",\n    \"password\": \"password123\"\n}"
+                            "raw": "{\n    \"name\": \"Test User\",\n    \"email\": \"test@example.com\",\n    \"password\": \"password123\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         },
                         "url": {
-                            "raw": "http://localhost:5000/api/auth/register",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/auth/register",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "auth",
                                 "register"
                             ]
-                        }
+                        },
+                        "description": "Creates an unverified account and emails a 6-digit code. Password: 8-128 characters. 503 with accountCreated: true if the email could not be sent (use Resend code)."
                     }
                 },
                 {
-                    "name": "Verify Account OTP",
+                    "name": "Verify code",
                     "event": [
                         {
                             "listen": "test",
                             "script": {
+                                "type": "text/javascript",
                                 "exec": [
-                                    "const responseData = pm.response.json();",
-                                    "if(responseData.token) {",
-                                    "    pm.environment.set(\"token\", responseData.token);",
+                                    "if (pm.response.code === 200) {",
+                                    "    pm.collectionVariables.set('user_token', pm.response.json().token);",
                                     "}"
-                                ],
-                                "type": "text/javascript"
+                                ]
                             }
                         }
                     ],
@@ -61,38 +67,78 @@
                                 "value": "application/json"
                             }
                         ],
+                        "auth": {
+                            "type": "noauth"
+                        },
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"email\": \"test@example.com\",\n    \"otp\": \"123456\"\n}"
+                            "raw": "{\n    \"email\": \"test@example.com\",\n    \"otp\": \"123456\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         },
                         "url": {
-                            "raw": "http://localhost:5000/api/auth/verify-otp",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/auth/verify-otp",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "auth",
                                 "verify-otp"
                             ]
-                        }
+                        },
+                        "description": "Verifies the account with the emailed code and returns a token (saved as user_token). Codes last 5 minutes and allow 5 attempts."
                     }
                 },
                 {
-                    "name": "Login",
+                    "name": "Resend code",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "auth": {
+                            "type": "noauth"
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"email\": \"test@example.com\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/resend-otp",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "resend-otp"
+                            ]
+                        },
+                        "description": "Emails a new verification code. 429 with retryAfterSeconds if one was sent less than 60 seconds ago. The reply is the same for unknown or already verified accounts."
+                    }
+                },
+                {
+                    "name": "Login (user)",
                     "event": [
                         {
                             "listen": "test",
                             "script": {
+                                "type": "text/javascript",
                                 "exec": [
-                                    "const responseData = pm.response.json();",
-                                    "if(responseData.token) {",
-                                    "    pm.environment.set(\"token\", responseData.token);",
+                                    "if (pm.response.code === 200) {",
+                                    "    pm.collectionVariables.set('user_token', pm.response.json().token);",
                                     "}"
-                                ],
-                                "type": "text/javascript"
+                                ]
                             }
                         }
                     ],
@@ -104,23 +150,77 @@
                                 "value": "application/json"
                             }
                         ],
+                        "auth": {
+                            "type": "noauth"
+                        },
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"email\": \"admin@bookeven.com\",\n    \"password\": \"password123\"\n}"
+                            "raw": "{\n    \"email\": \"user@bookeven.com\",\n    \"password\": \"password123\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         },
                         "url": {
-                            "raw": "http://localhost:5000/api/auth/login",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/auth/login",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "auth",
                                 "login"
                             ]
+                        },
+                        "description": "Returns a token valid for 7 days (saved as user_token). 403 needsVerification for unverified accounts (a code is emailed)."
+                    }
+                },
+                {
+                    "name": "Login (admin)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "if (pm.response.code === 200) {",
+                                    "    pm.collectionVariables.set('admin_token', pm.response.json().token);",
+                                    "}"
+                                ]
+                            }
                         }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "auth": {
+                            "type": "noauth"
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"email\": \"admin@bookeven.com\",\n    \"password\": \"password123\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/login",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "login"
+                            ]
+                        },
+                        "description": "Seeded admin account (development only). Token saved as admin_token."
                     }
                 }
             ]
@@ -129,38 +229,67 @@
             "name": "Events",
             "item": [
                 {
-                    "name": "Get All Events",
+                    "name": "List upcoming events",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "const events = pm.response.json();",
+                                    "if (events.length) pm.collectionVariables.set('event_id', events[0]._id);"
+                                ]
+                            }
+                        }
+                    ],
                     "request": {
                         "method": "GET",
                         "header": [],
+                        "auth": {
+                            "type": "noauth"
+                        },
                         "url": {
-                            "raw": "http://localhost:5000/api/events",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/events?when=upcoming&search=&category=",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "events"
+                            ],
+                            "query": [
+                                {
+                                    "key": "when",
+                                    "value": "upcoming",
+                                    "description": "upcoming (soonest first), past, or all (default)"
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "",
+                                    "description": "title contains (optional)"
+                                },
+                                {
+                                    "key": "category",
+                                    "value": "",
+                                    "description": "exact category (optional)"
+                                }
                             ]
                         }
                     }
                 },
                 {
-                    "name": "Get Event by ID",
+                    "name": "Get event",
                     "request": {
                         "method": "GET",
                         "header": [],
+                        "auth": {
+                            "type": "noauth"
+                        },
                         "url": {
-                            "raw": "http://localhost:5000/api/events/{{event_id}}",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/events/{{event_id}}",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "events",
                                 "{{event_id}}"
                             ]
@@ -168,18 +297,15 @@
                     }
                 },
                 {
-                    "name": "Create Event (Admin)",
+                    "name": "Create event (admin)",
                     "event": [
                         {
                             "listen": "test",
                             "script": {
+                                "type": "text/javascript",
                                 "exec": [
-                                    "const responseData = pm.response.json();",
-                                    "if(responseData._id) {",
-                                    "    pm.environment.set(\"event_id\", responseData._id);",
-                                    "}"
-                                ],
-                                "type": "text/javascript"
+                                    "if (pm.response.code === 201) pm.collectionVariables.set('event_id', pm.response.json()._id);"
+                                ]
                             }
                         }
                     ],
@@ -189,135 +315,152 @@
                             {
                                 "key": "Content-Type",
                                 "value": "application/json"
-                            },
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{token}}"
                             }
                         ],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"title\": \"Tech Conference 2024\",\n    \"description\": \"A massive conference for developers\",\n    \"date\": \"2024-12-01\",\n    \"location\": \"San Francisco, CA\",\n    \"category\": \"Technology\",\n    \"totalSeats\": 100,\n    \"ticketPrice\": 500,\n    \"image\": \"https://images.unsplash.com/photo-1540575467063-178a50c2df87\"\n}"
+                            "raw": "{\n    \"title\": \"Tech Conference\",\n    \"description\": \"A conference for developers.\",\n    \"date\": \"2027-03-15T18:30:00.000Z\",\n    \"location\": \"Convention Center\",\n    \"category\": \"Technology\",\n    \"totalSeats\": 100,\n    \"ticketPrice\": 500,\n    \"image\": \"\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         },
                         "url": {
-                            "raw": "http://localhost:5000/api/events",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/events",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "events"
                             ]
-                        }
+                        },
+                        "description": "date must be in the future (ISO 8601, with time). ticketPrice 0 = free. Saves event_id."
                     }
                 },
                 {
-                    "name": "Update Event (Admin)",
+                    "name": "Update event (admin)",
                     "request": {
                         "method": "PUT",
                         "header": [
                             {
                                 "key": "Content-Type",
                                 "value": "application/json"
-                            },
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{token}}"
                             }
                         ],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"ticketPrice\": 550\n}"
+                            "raw": "{\n    \"ticketPrice\": 550,\n    \"totalSeats\": 120\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         },
                         "url": {
-                            "raw": "http://localhost:5000/api/events/{{event_id}}",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/events/{{event_id}}",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "events",
                                 "{{event_id}}"
                             ]
-                        }
+                        },
+                        "description": "Send only the fields to change: title, description, date, location, category, totalSeats, ticketPrice, image. totalSeats cannot go below seats already confirmed."
                     }
                 },
                 {
-                    "name": "Delete Event (Admin)",
+                    "name": "Delete event (admin)",
                     "request": {
                         "method": "DELETE",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{token}}"
-                            }
-                        ],
+                        "header": [],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
                         "url": {
-                            "raw": "http://localhost:5000/api/events/{{event_id}}",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/events/{{event_id}}",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "events",
                                 "{{event_id}}"
                             ]
-                        }
+                        },
+                        "description": "Deletes the event, cancels its pending/confirmed bookings (kept as history) and emails those users. Returns cancelledBookings, emailsSent, emailsFailed."
                     }
                 }
             ]
         },
         {
-            "name": "Bookings",
+            "name": "Bookings (user)",
             "item": [
                 {
-                    "name": "Send Booking OTP Request",
+                    "name": "Send booking code",
                     "request": {
                         "method": "POST",
-                        "header": [
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json"
-                            },
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{token}}"
-                            }
-                        ],
+                        "header": [],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{user_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
                         "url": {
-                            "raw": "http://localhost:5000/api/bookings/send-otp",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/bookings/send-otp",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "bookings",
                                 "send-otp"
                             ]
-                        }
+                        },
+                        "description": "Emails a 6-digit booking code. Within 60 s of the last one, returns the same message plus retryAfterSeconds and the earlier code stays valid. 503 if the email fails."
                     }
                 },
                 {
-                    "name": "Verify & Request Booking (Paid/Free Event)",
+                    "name": "Request a seat",
                     "event": [
                         {
                             "listen": "test",
                             "script": {
+                                "type": "text/javascript",
                                 "exec": [
-                                    "const responseData = pm.response.json();",
-                                    "if(responseData.booking && responseData.booking._id) {",
-                                    "    pm.environment.set(\"booking_id\", responseData.booking._id);",
-                                    "}"
-                                ],
-                                "type": "text/javascript"
+                                    "if (pm.response.code === 201) pm.collectionVariables.set('booking_id', pm.response.json().booking._id);"
+                                ]
                             }
                         }
                     ],
@@ -327,112 +470,267 @@
                             {
                                 "key": "Content-Type",
                                 "value": "application/json"
-                            },
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{token}}"
                             }
                         ],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{user_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"eventId\": \"{{event_id}}\",\n    \"otp\": \"123456\"\n}"
+                            "raw": "{\n    \"eventId\": \"{{event_id}}\",\n    \"otp\": \"123456\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         },
                         "url": {
-                            "raw": "http://localhost:5000/api/bookings",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/bookings",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "bookings"
                             ]
-                        }
+                        },
+                        "description": "Creates a pending booking. Fails if the event has started, is sold out, or the user already has a pending/confirmed booking for it. Saves booking_id."
                     }
                 },
                 {
-                    "name": "Confirm Booking (Admin - Paid)",
+                    "name": "My bookings",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{user_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/bookings/my",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "my"
+                            ]
+                        },
+                        "description": "The caller's own bookings, newest first, for every role."
+                    }
+                },
+                {
+                    "name": "Cancel booking",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{user_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/bookings/{{booking_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "{{booking_id}}"
+                            ]
+                        },
+                        "description": "Owner or admin. A confirmed seat is returned to the event."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Bookings (admin)",
+            "item": [
+                {
+                    "name": "List all bookings",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/bookings?page=1&limit=20&status=&eventId=",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "bookings"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "20",
+                                    "description": "1-100"
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "",
+                                    "description": "pending | confirmed | rejected | cancelled (optional)"
+                                },
+                                {
+                                    "key": "eventId",
+                                    "value": "",
+                                    "description": "optional"
+                                }
+                            ]
+                        },
+                        "description": "Returns { items, page, limit, total, totalPages }, newest first."
+                    }
+                },
+                {
+                    "name": "Booking stats",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/bookings/stats?eventId=",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "stats"
+                            ],
+                            "query": [
+                                {
+                                    "key": "eventId",
+                                    "value": "",
+                                    "description": "optional"
+                                }
+                            ]
+                        },
+                        "description": "totalRevenue (confirmed + paid), paidClients, pendingRequests, byStatus, totalBookings."
+                    }
+                },
+                {
+                    "name": "Approve booking",
                     "request": {
                         "method": "PUT",
                         "header": [
                             {
                                 "key": "Content-Type",
                                 "value": "application/json"
-                            },
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{token}}"
                             }
                         ],
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"paymentStatus\": \"paid\"\n}"
+                            "raw": "{\n    \"paymentStatus\": \"paid\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
                         },
                         "url": {
-                            "raw": "http://localhost:5000/api/bookings/{{booking_id}}/confirm",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/bookings/{{booking_id}}/confirm",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "bookings",
                                 "{{booking_id}}",
                                 "confirm"
                             ]
-                        }
+                        },
+                        "description": "paymentStatus: 'paid' or 'not_paid'. Takes a seat. emailSent tells whether the confirmation email went out."
                     }
                 },
                 {
-                    "name": "Get My Bookings",
+                    "name": "Reject booking",
                     "request": {
-                        "method": "GET",
+                        "method": "PUT",
                         "header": [
                             {
-                                "key": "Authorization",
-                                "value": "Bearer {{token}}"
+                                "key": "Content-Type",
+                                "value": "application/json"
                             }
                         ],
-                        "url": {
-                            "raw": "http://localhost:5000/api/bookings/my",
-                            "protocol": "http",
-                            "host": [
-                                "localhost"
-                            ],
-                            "port": "5000",
-                            "path": [
-                                "api",
-                                "bookings",
-                                "my"
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{admin_token}}",
+                                    "type": "string"
+                                }
                             ]
-                        }
-                    }
-                },
-                {
-                    "name": "Cancel/Reject Booking (Admin/User)",
-                    "request": {
-                        "method": "DELETE",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{token}}"
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"reason\": \"Payment not received\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
                             }
-                        ],
+                        },
                         "url": {
-                            "raw": "http://localhost:5000/api/bookings/{{booking_id}}",
-                            "protocol": "http",
+                            "raw": "{{base_url}}/bookings/{{booking_id}}/reject",
                             "host": [
-                                "localhost"
+                                "{{base_url}}"
                             ],
-                            "port": "5000",
                             "path": [
-                                "api",
                                 "bookings",
-                                "{{booking_id}}"
+                                "{{booking_id}}",
+                                "reject"
                             ]
-                        }
+                        },
+                        "description": "Pending bookings only. Reason is optional (max 500 characters) and is shown and emailed to the user."
                     }
                 }
             ]
@@ -440,17 +738,22 @@
     ],
     "variable": [
         {
-            "key": "token",
+            "key": "base_url",
+            "value": "http://localhost:5000/api",
+            "type": "string"
+        },
+        {
+            "key": "user_token",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "admin_token",
             "value": "",
             "type": "string"
         },
         {
             "key": "event_id",
-            "value": "",
-            "type": "string"
-        },
-        {
-            "key": "free_event_id",
             "value": "",
             "type": "string"
         },

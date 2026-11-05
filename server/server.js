@@ -2,7 +2,9 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const path = require('path');
 
-dotenv.config();
+// Always read server/.env, whatever folder the command is started from.
+// A project-root .env is still read as a fallback; values already set are never overridden.
+dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const { loadConfig } = require('./utils/config');

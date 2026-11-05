@@ -1,87 +1,145 @@
 # BookEven - Full-Stack Event Booking Platform
 
-BookEven is a full-stack MERN application that allows users to seamlessly browse, register, and pay natively without any third party tools. It features an administrative dashboard for event organizers to create and manage free and paid events. All bookings can be managed manually by an admin to handle payments directly.
+BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. Admins publish free or paid events; attendees verify their email, request a seat with a one-time code, and an admin approves or declines each request. Payment happens outside the app (cash, UPI, bank transfer) and the admin records it when approving.
 
 ## Features
-- **User Authentication**: Secure login & registration with JWT and bcrypt.
-- **2FA OTP Verification**: 
-  - Mandatory Email OTP to activate your account upon Registration (or delayed login attempts).
-  - Mandatory Email OTP to finalize and secure event ticket booking.
-- **Role-Based Access**: 
-  - **Admin**: Create, edit, and delete events. Confirm and reject all incoming booking requests, mark them as 'Paid' or 'Not Paid'. Access is strictly locked to database-flagged users only.
-  - **User**: Browse events, submit ticket booking requests via OTP, view personal dashboard pending status, and cancel bookings.
-- **Event Management**: Create free and paid events with detailed descriptions, external image URLs, dates, categories, and seating capacity.
-- **Smart Booking System**:
-  - Mandatory 2FA OTP to authorize a booking request.
-  - All booking requests (both free and paid) enter a secure 'Pending' queue for Admin verification.
-  - Seat availability accurately updates and securely validates against overbooking logic.
-- **Admin Analytics Dashboard**: Track live data such as Pending Requests, Total Revenue, and Total Confirmed Paid Clients directly from the admin panel.
-- **Email Notifications**: Automated email delivery upon successful booking confirmation using Nodemailer.
-- **Sleek UI/UX**: Built entirely with React, Tailwind CSS, and polished with micro-interactions.
+- **Accounts**: registration with email verification code, login with JWT (valid 7 days), bcrypt-hashed passwords. Emails are case-insensitive.
+- **Email codes (OTP)**: 6-digit codes, valid 5 minutes, single use, 5 attempts per code, "Resend code" after 60 seconds.
+- **Roles**:
+  - **Admin**: create, edit and delete events; approve requests as *Paid* or *Not paid*; decline requests with an optional reason; see revenue, paid clients and pending requests; filter and page through all bookings.
+  - **User**: browse upcoming events, request a seat with an email code, see status and reasons in *My Bookings*, cancel, and request again after a decline.
+- **Booking rules**:
+  - A seat is taken only when an admin approves; approvals can never overbook, even when several happen at once.
+  - One pending/confirmed booking per user per event (enforced by the database).
+  - Booking closes when the event starts.
+  - Approve, cancel, decline and event deletion each run in a MongoDB transaction: all of it happens or none of it does.
+  - Deleting an event cancels its active bookings, keeps them as history and emails the users.
+- **Emails** (Nodemailer + Gmail): verification codes, booking confirmed, request declined, event cancelled. If an email cannot be sent, the API says so instead of failing silently.
+- **Security**: input validation on every endpoint, protection against NoSQL injection, rate limits on login/sign-up/codes/bookings, security headers, CORS allow-list, server refuses to start with a weak or published JWT secret.
 
 ---
 
-## 🚀 Setup Instructions
+## Setup
 
 ### Prerequisites
-Make sure you have [Node.js](https://nodejs.org/) installed on your machine.
-You will also need a MongoDB database (e.g., [MongoDB Atlas Free Tier](https://www.mongodb.com/cloud/atlas/register)).
+- [Node.js](https://nodejs.org/) 18 or newer.
+- A MongoDB database that supports **transactions**: [MongoDB Atlas](https://www.mongodb.com/cloud/atlas/register) (the free tier works) or a local replica set. A plain standalone `mongod` is **not** supported; the server refuses to start on one.
+- A Gmail account with an **App Password** for sending email (see [SETUP_GUIDE.md](SETUP_GUIDE.md)).
 
-### 1. Environment Variables Configuration
-Navigate to `server/.env` and fill in the necessary keys:
+### 1. Server environment (`server/.env`)
+Copy `server/.env.example` to `server/.env` and fill it in. The server always reads this file, whichever folder you start it from.
 ```env
-MONGO_URI=your_mongodb_connection_string
+MONGO_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/bookeven?retryWrites=true&w=majority
 JWT_SECRET=paste_a_long_random_secret_here
 EMAIL_USER=your_gmail_address
-EMAIL_PASS=your_gmail_app_password
+EMAIL_PASS=your_16_letter_gmail_app_password
 PORT=5000
 CLIENT_ORIGIN=http://localhost:5173
+# Optional
+# JWT_EXPIRES_IN=7d
+# TRUST_PROXY=1
 ```
-> **JWT_SECRET**: generate your own with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. The server refuses to start if the secret is missing, shorter than 32 characters, or a published example value. Never commit it or paste it into docs.
->
-> **CLIENT_ORIGIN**: the URL of the frontend allowed to call the API (comma-separate several). Defaults to `http://localhost:5173`.
-> **Note**: For `EMAIL_PASS`, you need to generate an "App Password" from your Google Account settings, standard passwords won't work due to 2FA.
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `MONGO_URI` | Yes | Atlas or a replica set (transactions are required). |
+| `JWT_SECRET` | Yes | At least 32 characters. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. Never commit it. |
+| `EMAIL_USER`, `EMAIL_PASS` | Yes, for email | Gmail address and its 16-letter App Password. Without them, verification codes cannot be delivered (the server warns at startup). |
+| `CLIENT_ORIGIN` | No | Frontend URL(s) allowed to call the API, comma-separated. Default `http://localhost:5173`. |
+| `PORT` | No | Default `5000`. |
+| `JWT_EXPIRES_IN` | No | Login lifetime, default `7d`. |
+| `TRUST_PROXY` | When hosted | Set to `1` behind a proxy (Render, Railway, Nginx) so rate limits see real client IPs. |
 
-### 2. Run from Outer Folder (Single Terminal)
-You can now manage both backend and frontend from the project root:
+### 2. Client environment (optional, `client/.env.local`)
+Only needed when the API is not at `http://localhost:5000/api`:
+```env
+VITE_API_URL=https://your-api.example.com/api
+```
 
+### 3. Install and run
+From the project root (one terminal):
 ```bash
-# from BookEven root
 npm install
 npm run install:all
 npm run dev
 ```
+- `npm run dev` starts the server (`http://localhost:5000`) and the client (`http://localhost:5173`) together.
+- `npm run dev:all` installs everything and starts both.
+- `npm run start` runs the server and a production preview of the client.
 
-- `npm run dev` starts both `server` and `client` together using `concurrently`.
-- `npm run dev:all` installs dependencies (server + client) and starts both in one command.
-- `npm run start` runs backend `start` + frontend `preview` together.
+Or in two terminals:
+```bash
+cd server && npm install --legacy-peer-deps && npm run dev
+cd client && npm install && npm run dev
+```
 
-### 3. Install Dependencies
-Open two separate terminals for the backend and frontend.
-
-**Backend Terminal:**
+### 4. Demo data (development only)
 ```bash
 cd server
-npm install --legacy-peer-deps
+npm run seed
 ```
+**This deletes every user, event and booking** in the database from `MONGO_URI`, then creates 10 users, 6 events and random bookings. All seeded accounts use the password `password123` (admin: `admin@bookeven.com`). Never run it against a database with real data. It refuses to run when `NODE_ENV=production`.
 
-**Frontend Terminal:**
-```bash
-cd client
-npm install
-```
+---
 
-### 4. Run the Application Local Servers
-**Run Backend:**
+## Testing
 ```bash
 cd server
-npm run dev
+npm test
 ```
-*(Server will run on `http://localhost:5000`)*
+Runs every automated test (about 25 seconds) against **in-memory MongoDB replica sets**; it never connects to the database in `.env` and never sends email. It covers:
+- the original 102 security and booking checks (`tests/legacy/phase1-checks.js`),
+- database integrity: duplicate prevention, transaction rollback, concurrent approvals and cancellations, event deletion (`tests/wp1.integrity.test.js`),
+- the data migration script (`tests/wp1.migration.test.js`),
+- every API endpoint, email failure handling, pagination, stats and a full user journey (`tests/wp2.api.test.js`).
 
-**Run Frontend:**
+Build check for the client: `cd client && npm run build`.
+
+## Database migration (for existing data)
+`server/scripts/migrate-phase2.js` brings a database created by an older version up to date: lowercases emails, cancels bookings whose event no longer exists, fills in event snapshots on bookings, recomputes seat counts and creates indexes.
 ```bash
-cd client
-npm run dev
+cd server
+npm run migrate:phase2                                   # dry run: reports only, changes nothing
+npm run migrate:phase2 -- --apply --db=<database name>   # apply (take a backup first)
+npm run migrate:phase2 -- --rollback                     # dry run of the rollback
 ```
-*(Client will run on a local port provided by Vite, typically `http://localhost:5173`)*
+It stops without changing anything if two accounts share an email (ignoring case) or a user has two active bookings for one event; those need a manual decision first. A brand-new or empty database does not need it: the server creates its indexes on startup.
+
+---
+
+## API reference
+Base URL: `http://localhost:5000/api`. Authenticated requests send `Authorization: Bearer <token>`. A ready-made Postman collection is in [`BookEven_Postman_Collection.json`](BookEven_Postman_Collection.json).
+
+| Method | Path | Who | Purpose |
+| --- | --- | --- | --- |
+| POST | `/auth/register` | Public | Create account; emails a verification code (`503` + `accountCreated` if the email fails) |
+| POST | `/auth/verify-otp` | Public | Verify email with the code; returns a token |
+| POST | `/auth/resend-otp` | Public | New verification code (`429` with `retryAfterSeconds` within 60 s) |
+| POST | `/auth/login` | Public | Log in; `403 needsVerification` for unverified accounts |
+| GET | `/events?when=upcoming\|past\|all&search=&category=` | Public | List events (`upcoming`: soonest first) |
+| GET | `/events/:id` | Public | Event details |
+| POST | `/events` | Admin | Create event (date must be in the future) |
+| PUT | `/events/:id` | Admin | Update any of: title, description, date, location, category, totalSeats, ticketPrice, image |
+| DELETE | `/events/:id` | Admin | Delete event, cancel its active bookings, email users |
+| POST | `/bookings/send-otp` | User | Email a booking code |
+| POST | `/bookings` | User | Request a seat: `{ eventId, otp }` |
+| GET | `/bookings/my` | User | The caller's own bookings |
+| DELETE | `/bookings/:id` | Owner / Admin | Cancel; a confirmed seat is returned |
+| GET | `/bookings?page=&limit=&status=&eventId=` | Admin | All bookings, newest first, 20 per page (max 100) |
+| GET | `/bookings/stats?eventId=` | Admin | Revenue, paid clients, counts by status |
+| PUT | `/bookings/:id/confirm` | Admin | Approve: `{ paymentStatus: "paid" \| "not_paid" }` |
+| PUT | `/bookings/:id/reject` | Admin | Decline: `{ reason? }` (max 500 characters) |
+
+Booking statuses: `pending` → `confirmed` or `rejected`; `pending`/`confirmed` → `cancelled`.
+
+---
+
+## Troubleshooting
+| Message | Cause and fix |
+| --- | --- |
+| `Invalid server configuration: JWT_SECRET ...` | Set a random secret of 32+ characters in `server/.env`. |
+| `This MongoDB deployment does not support transactions` | Use MongoDB Atlas or a replica set, not a standalone `mongod`. |
+| `MongoDB Connection Error: bad auth` | Wrong database user or password in `MONGO_URI` (Atlas > Database Access). |
+| `MongoDB Connection Error` with an SSL/TLS alert | Your IP is not allowed (Atlas > Network Access > Add Current IP Address). |
+| `535 Username and Password not accepted` in the server log | `EMAIL_PASS` must be a Gmail App Password for the `EMAIL_USER` account, not the normal password. |
+| `We could not send the email with your code right now` | Same as above, or Gmail is temporarily unavailable. The user can press **Resend code**. |
+| Requests from the browser are blocked (CORS) | Add the frontend URL to `CLIENT_ORIGIN`. |

@@ -1,8 +1,10 @@
 const nodemailer = require('nodemailer');
+const path = require('path');
 const dotenv = require('dotenv');
 const { escapeHtml } = require('./validation');
 
-dotenv.config();
+// Read server/.env even when this file is loaded on its own (e.g. by a script).
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
