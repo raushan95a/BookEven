@@ -2,6 +2,52 @@
 
 BookEven is a MERN (MongoDB, Express, React, Node.js) app for small organisers. Admins publish free or paid events, and any user can host their own events once an admin approves them; attendees verify their email, request a seat with a one-time code, and the organiser or an admin approves or declines each request. Payment happens outside the app (cash, UPI, bank transfer) and the admin records it when approving.
 
+<!-- TODO: replace the placeholders below once the deployment is final. -->
+**Live demo:** _coming soon_ (frontend on Vercel) · **API:** _coming soon_ (Render) · **Source:** [github.com/raushan95a/BookEven](https://github.com/raushan95a/BookEven)
+
+> The API runs on Render's free plan, which sleeps when idle: the first request after a while can take up to a minute.
+
+### Try it
+<!-- TODO: create these accounts on the deployed database with `npm run create-user` (see "Demo accounts" below), then fill in the table. -->
+| Role | Email | Password |
+| --- | --- | --- |
+| Attendee / organiser | _coming soon_ | _coming soon_ |
+| Admin | _available on request_ | |
+
+Or register with your own email: a verification code is sent to it.
+
+### Screenshots
+| Events | Event page and booking |
+| --- | --- |
+| ![Home page](docs/screenshots/home.png) | ![Booking an event](docs/screenshots/event-booking.png) |
+| **Admin dashboard** | **Event review** |
+| ![Admin dashboard](docs/screenshots/admin-dashboard.png) | ![Event submissions](docs/screenshots/event-review.png) |
+
+_Screenshots use the demo data from `npm run seed`._
+
+## Highlights
+- **No overbooking, even under load.** Seat checks and seat updates are single atomic operations inside MongoDB transactions, and a unique partial index allows only one active booking per user per event. Tests fire concurrent requests at the last seat to prove it.
+- **Three roles with a review workflow.** Any user can host an event; it stays hidden until an admin approves it, and later edits to key details wait for review while the live event stays bookable.
+- **Security built in.** Email verification with hashed, single-use, rate-limited codes; JWT authentication with role checks on every route; validation against NoSQL injection; the server refuses to start with a weak secret.
+- **Tested.** 131 automated tests run against an in-memory MongoDB replica set, covering race conditions, transaction rollback, email failures and permission rules.
+
+## Tech stack
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 18, React Router, Vite, Tailwind CSS, Axios |
+| Backend | Node.js, Express, Mongoose, JWT, bcrypt |
+| Database | MongoDB Atlas (replica set, for transactions) |
+| Email | Nodemailer + Gmail (local), Brevo API (deployed) |
+| Testing | Node.js test runner, mongodb-memory-server |
+| Hosting | Vercel (client), Render (API) |
+
+## How booking works
+The core flow for an event where the organiser approves each request: the attendee asks for a code, books with it, and the organiser or an admin approves the request, which takes a seat and emails a confirmation. On auto-approve events the seat is taken at the moment of booking.
+
+| Sequence | Flowchart |
+| --- | --- |
+| ![Booking sequence diagram](docs/diagrams/booking-sequence.png) | ![Booking flowchart](docs/diagrams/booking-flowchart.png) |
+
 ## Features
 - **Accounts**: registration with email verification code, login with JWT (valid 7 days), bcrypt-hashed passwords. Emails are case-insensitive.
 - **Email codes (OTP)**: 6-digit codes, valid 5 minutes, single use, 5 attempts per code, "Resend code" after 60 seconds.
@@ -91,7 +137,17 @@ npm run seed
 **This deletes every user, event and booking** in the database from `MONGO_URI`, then creates 10 verified users, 6 events and random bookings. All seeded accounts use the password `password123` (admin: `admin@bookeven.com`). Never run it against a database with real data. It refuses to run when `NODE_ENV=production`.
 
 ### 5. First run: accounts and admins
-A new database is empty, so no one can log in until you either run the seed above or register in the app. Accounts created through **Register** are always ordinary users; the API ignores any `role` sent with the request. To make an account an admin, change its `role` from `"user"` to `"admin"` in the `users` collection (Atlas → Browse Collections), then log out and back in. Admins land on `/admin` after logging in; users land on `/dashboard`.
+A new database is empty, so no one can log in until you either run the seed above or register in the app. Accounts created through **Register** are always ordinary users; the API ignores any `role` sent with the request. Admins land on `/admin` after logging in; users land on `/dashboard`.
+
+### 6. Demo accounts and admins (`create-user`)
+Creates or updates **one** verified account and changes nothing else, so it is safe on a deployed database (unlike the seed). It uses `MONGO_URI` from `server/.env`; to target the deployed database, put that connection string there temporarily (or set `MONGO_URI` in the terminal).
+```bash
+cd server
+npm run create-user -- --email=demo@example.com --name="Demo User" --password=DemoPass123
+npm run create-user -- --email=you@gmail.com --role=admin     # make an existing account admin
+npm run create-user -- --email=demo@example.com --password=NewPass123   # reset a password
+```
+A new account needs `--name` and `--password` (8+ characters); `--role` is `user` (default) or `admin`. Log out and back in after a role change. Avoid publishing an admin login: anyone with it can edit or delete every event.
 
 A step-by-step walkthrough for testing every feature in the browser is in [SETUP_GUIDE.md](SETUP_GUIDE.md#step-7-test-it-in-the-browser).
 
@@ -108,7 +164,9 @@ Runs every automated test (about 25 seconds) against **in-memory MongoDB replica
 - the data migration script (`tests/wp1.migration.test.js`),
 - every API endpoint, email failure handling, pagination, stats and a full user journey (`tests/wp2.api.test.js`),
 - auto-approval: instant confirmation, last-seat races, rollback and recording payment (`tests/auto-approval.test.js`),
-- hosting events: submission and review, proposed changes, and that organisers can only reach their own events and bookings (`tests/wp5.organiser.test.js`).
+- hosting events: submission and review, proposed changes, organisers reaching only their own events and bookings and never booking them, and the rules once an event has started (`tests/wp5.organiser.test.js`),
+- choosing between Gmail and Brevo for email (`tests/email-provider.test.js`),
+- the `create-user` script (`tests/create-user.test.js`).
 
 Build check for the client: `cd client && npm run build`.
 
