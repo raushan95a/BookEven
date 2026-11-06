@@ -8,7 +8,8 @@
         "dev": "nodemon server.js",
         "seed": "node seed.js",
         "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\"",
-        "migrate:phase2": "node scripts/migrate-phase2.js"
+        "migrate:phase2": "node scripts/migrate-phase2.js",
+        "create-user": "node scripts/create-user.js"
     },
     "dependencies": {
         "bcryptjs": "^2.4.3",

@@ -87,9 +87,20 @@ This **deletes all users, events and bookings** in the database, then adds 10 ve
 Run it once, before you create anything you want to keep.
 
 **Option B: Your own account**
-Register in the app with your real email (Step 7). New accounts are always ordinary users. To make yours an admin, open Atlas → **Browse Collections** → your database → `users`, edit your account, change `role` from `"user"` to `"admin"`, then log out and log in again.
+Register in the app with your real email (Step 7). New accounts are always ordinary users. To make yours an admin, run:
+```bash
+npm run create-user --prefix server -- --email=you@gmail.com --role=admin
+```
+then log out and log in again. (You can also edit `role` in Atlas → **Browse Collections** → `users`.)
 
-There is no other way to become admin: the app never lets a user choose their own role.
+**Option C: Create accounts directly (no email needed, nothing deleted)**
+```bash
+npm run create-user --prefix server -- --email=demo@example.com --name="Demo User" --password=DemoPass123
+npm run create-user --prefix server -- --email=admin@example.com --name="Admin" --password=AdminPass123 --role=admin
+```
+Accounts made this way are already verified. This is also how to add demo accounts to a deployed database (point `MONGO_URI` at it).
+
+The app itself never lets a user choose their own role.
 
 ---
 
@@ -150,7 +161,7 @@ Use a normal window for one account and a private/incognito window for another, 
 npm test --prefix server
 ```
 
-About 25 seconds, 125 tests. They run on a temporary in-memory database: they **never** touch the database in `.env` and never send email. A `MongoNetworkError: read ECONNRESET` line near the end is harmless shutdown noise; check the final `pass` / `fail` counts.
+About 25 seconds, 131 tests. They run on a temporary in-memory database: they **never** touch the database in `.env` and never send email. A `MongoNetworkError: read ECONNRESET` line near the end is harmless shutdown noise; check the final `pass` / `fail` counts.
 
 Client build check: `npm run build`.
 
